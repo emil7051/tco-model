@@ -48,8 +48,16 @@ def basic_scenario():
         annual_mileage=15000,
         electric_vehicle=ElectricVehicle(**ev_data), # Instantiate vehicle
         diesel_vehicle=DieselVehicle(**diesel_data), # Instantiate vehicle
-        infrastructure_cost=5000,
-        infrastructure_maintenance_percent=0.01,
+        charger_cost=5000,
+        charger_installation_cost=1000, # Added example value
+        charger_maintenance_percent=0.01,
+        charger_lifespan=10, # Added example value
+        electric_maintenance_cost_per_km=0.03, # Added
+        diesel_maintenance_cost_per_km=0.05, # Added
+        insurance_base_rate=0.025, # Added example value
+        electric_insurance_cost_factor=1.0, # Added example value
+        diesel_insurance_cost_factor=1.0, # Added example value
+        annual_registration_cost=550, # Added example value
         battery_degradation_rate=0.02, # Annual capacity loss
         insurance_increase_rate=0.01,
         registration_increase_rate=0.01,
@@ -155,15 +163,18 @@ def test_calculate_spot_check_values(calculator, basic_scenario):
     assert diesel_costs.loc[0, 'EnergyCost'] == pytest.approx(expected_diesel_energy_y1)
 
     # Example Spot Check: EV Acquisition Cost Year 1 (undiscounted)
-    # Purchase price = 60000
-    expected_ev_acq_y1 = 60000.0
+    # Default financing is 'loan', so cost in year 0 is down payment.
+    # Purchase price = 60000, down_payment_pct = 0.2 (default in Scenario)
+    expected_ev_acq_y1 = 60000.0 * 0.2
     assert ev_costs.loc[0, 'AcquisitionCost'] == pytest.approx(expected_ev_acq_y1)
 
     # Example Spot Check: EV Infrastructure Cost Year 1 (undiscounted)
-    # Infrastructure cost = 5000
+    # Charger cost = 5000, Install = 1000, Lifespan = 10
+    # Amortized = (5000+1000)/10 = 600
     # Maintenance % = 0.01 -> 5000 * 0.01 = 50
-    # Cost Year 1 (index 0) = Upfront + Maintenance = 5000 + 50 = 5050
-    expected_ev_infra_y1 = 5050.0 
+    # Maintenance increase rate = 0.01
+    # Cost Year 1 (index 0) = Amortized + Maintenance * (1+increase_rate)^0 = 600 + 50 * (1.01)^0 = 650
+    expected_ev_infra_y1 = 650.0 # Updated expectation: Amortized Capital + Maintenance Y1
     assert ev_costs.loc[0, 'InfrastructureCost'] == pytest.approx(expected_ev_infra_y1)
 
     # Example Spot Check: Diesel Maintenance Cost Year 2 (undiscounted)

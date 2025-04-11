@@ -43,16 +43,24 @@ class Scenario(BaseModel):
     loan_term: int = Field(5, description="Loan term in years", gt=0)
     interest_rate: float = Field(0.05, description="Annual interest rate for loan", ge=0)
 
-    # Infrastructure (EV Specific)
-    infrastructure_cost: float = Field(0.0, description="Upfront infrastructure cost (e.g., charger, installation) (AUD)", ge=0)
-    infrastructure_maintenance_percent: float = Field(0.01, description="Annual infrastructure maintenance as a percentage of upfront cost", ge=0)
-    infrastructure_lifespan: int = Field(10, description="Lifespan of the infrastructure in years", gt=0)
+    # Infrastructure (EV Specific) - Charger costs etc.
+    charger_cost: float = Field(0.0, description="Upfront charger cost (AUD)", ge=0)
+    charger_installation_cost: float = Field(0.0, description="Upfront charger installation cost (AUD)", ge=0)
+    charger_maintenance_percent: float = Field(0.01, description="Annual charger maintenance as a percentage of upfront cost", ge=0)
+    charger_lifespan: int = Field(10, description="Lifespan of the charger in years", gt=0)
 
     # --- Base Prices / Rates (Year 0) ---
     electricity_price: float = Field(..., description="Initial electricity price (AUD/kWh)", ge=0)
     diesel_price: float = Field(..., description="Initial diesel price (AUD/L)", ge=0)
     carbon_tax_rate: float = Field(0.0, description="Initial carbon tax rate (AUD/tonne CO2e)", ge=0)
     road_user_charge: float = Field(0.0, description="Initial road user charge (AUD/km)", ge=0)
+    electric_maintenance_cost_per_km: float = Field(..., description="Base maintenance cost for electric vehicles (AUD/km)", ge=0)
+    diesel_maintenance_cost_per_km: float = Field(..., description="Base maintenance cost for diesel vehicles (AUD/km)", ge=0)
+    # Placeholder base insurance rate - specific factors per vehicle type apply
+    insurance_base_rate: float = Field(0.03, description="Base annual insurance rate as a fraction of purchase price", ge=0)
+    electric_insurance_cost_factor: float = Field(1.0, description="Multiplier factor for EV insurance cost relative to base rate", ge=0)
+    diesel_insurance_cost_factor: float = Field(1.0, description="Multiplier factor for Diesel insurance cost relative to base rate", ge=0)
+    annual_registration_cost: float = Field(..., description="Base annual registration cost (AUD)", ge=0)
 
     # --- Annual Increase Rates --- (e.g., 0.02 for 2% increase)
     electricity_price_increase: float = Field(0.0, description="Annual increase rate for electricity price", ge=0)

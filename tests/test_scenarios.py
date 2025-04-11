@@ -49,12 +49,20 @@ BASE_SCENARIO_CONFIG = {
     # Placeholders for vehicle objects, will be filled in the fixture
     "electric_vehicle": None,
     "diesel_vehicle": None,
-    "infrastructure_cost": 45000,
-    "infrastructure_maintenance_percent": 0.01,
+    "charger_cost": 45000,
+    "charger_installation_cost": 2000,
+    "charger_maintenance_percent": 0.01,
+    "charger_lifespan": 10,
     "electricity_price": 0.22, # Base price
     "diesel_price": 1.80, # Base price
     "carbon_tax_rate": 25.0,
     "road_user_charge": 0.03,
+    "electric_maintenance_cost_per_km": 0.03,
+    "diesel_maintenance_cost_per_km": 0.05,
+    "insurance_base_rate": 0.025,
+    "electric_insurance_cost_factor": 1.0,
+    "diesel_insurance_cost_factor": 1.0,
+    "annual_registration_cost": 550,
     "electricity_price_increase": 0.02,
     "diesel_price_increase": 0.01,
     "carbon_tax_increase_rate": 0.03,

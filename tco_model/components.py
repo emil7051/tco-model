@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 import numpy as np # Needed for financial calculations like PMT
+import numpy_financial as npf # Import the financial functions
 import logging
 from pydantic import PrivateAttr
 
@@ -122,14 +123,41 @@ class AcquisitionCost(CostComponent):
         self, year: int, vehicle: Vehicle, scenario: Scenario, 
         calculation_year_index: int, total_mileage_km: float
     ) -> float:
-        """Return the vehicle purchase price only in the first year (index 0)."""
+        """Return the vehicle acquisition cost based on financing method."""
         
-        # Simple model: full cost is incurred only in the first year (index 0)
-        return vehicle.purchase_price if calculation_year_index == 0 else 0.0
+        financing_method = scenario.financing_method.lower()
+        purchase_price = vehicle.purchase_price
         
-        # Removed previous logic based on scenario.financing_method, loan_term etc.
-        # If financing needs to be modelled, it should be added back with parameters
-        # either on the Scenario or potentially as a separate Financing component.
+        if financing_method == 'cash':
+            # Full purchase price in year 0 (index 0), 0 otherwise
+            return purchase_price if calculation_year_index == 0 else 0.0
+        
+        elif financing_method == 'loan':
+            if calculation_year_index == 0:
+                # Year 0: Down payment
+                down_payment = purchase_price * scenario.down_payment_pct
+                return down_payment
+            elif 1 <= calculation_year_index <= scenario.loan_term:
+                # Years 1 to loan_term: Calculate annual loan payment
+                loan_amount = purchase_price * (1.0 - scenario.down_payment_pct)
+                interest_rate = scenario.interest_rate
+                loan_term = scenario.loan_term
+                
+                # Handle zero interest rate separately to avoid numpy errors
+                if interest_rate == 0:
+                    annual_payment = loan_amount / loan_term if loan_term > 0 else 0.0
+                elif loan_term > 0:
+                    # Use npf.pmt now
+                    annual_payment = -npf.pmt(interest_rate, loan_term, loan_amount)
+                else: 
+                    annual_payment = 0.0 # No payment if term is 0
+                    
+                return annual_payment
+            else:
+                # After loan term, cost is 0
+                return 0.0
+        else:
+            raise ValueError(f"Unsupported financing method: {scenario.financing_method}")
 
 
 class EnergyCost(CostComponent):
@@ -145,13 +173,15 @@ class EnergyCost(CostComponent):
         if isinstance(vehicle, ElectricVehicle):
             energy_price = scenario.get_annual_price('electricity', calculation_year_index)
             if energy_price is None:
-                 raise ValueError(f"Electricity price for year index {calculation_year_index} (Year {year}) not found.")
+                 # Match test expectation exactly
+                 raise ValueError(f"Electricity price for year {year} not found")
             return vehicle.calculate_annual_energy_cost(annual_mileage, energy_price)
             
         elif isinstance(vehicle, DieselVehicle):
             energy_price = scenario.get_annual_price('diesel', calculation_year_index)
             if energy_price is None:
-                 raise ValueError(f"Diesel price for year index {calculation_year_index} (Year {year}) not found.")
+                 # Match test expectation exactly
+                 raise ValueError(f"Diesel price for year {year} not found")
             return vehicle.calculate_annual_energy_cost(annual_mileage, energy_price)
             
         else:
@@ -185,40 +215,61 @@ class InfrastructureCost(CostComponent):
         self, year: int, vehicle: Vehicle, scenario: Scenario,
         calculation_year_index: int, total_mileage_km: float
     ) -> float:
-        """Calculate infrastructure costs (upfront cost in year 0 + annual maintenance)."""
+        """Calculate infrastructure costs (amortized upfront + annual maintenance)."""
         # This component should only apply to Electric Vehicles
         if not isinstance(vehicle, ElectricVehicle):
             return 0.0
 
-        upfront_cost = scenario.infrastructure_cost if calculation_year_index == 0 else 0.0
+        # Use renamed charger attributes from scenario
+        capital_cost = scenario.charger_cost + scenario.charger_installation_cost
+        lifespan = scenario.charger_lifespan
+        maintenance_percent = scenario.charger_maintenance_percent # Annual % of initial charger_cost
+        # Assume infrastructure maintenance increases at same rate as general maintenance
+        maintenance_increase_rate = scenario.maintenance_increase_rate 
+
+        # Calculate amortized upfront cost for the current year
+        amortized_upfront_cost = 0.0
+        if lifespan > 0:
+            # Cost applies during the charger's lifespan (years 0 to lifespan-1)
+            if 0 <= calculation_year_index < lifespan:
+                amortized_upfront_cost = capital_cost / lifespan
+        elif lifespan == 0:
+             # If lifespan is 0, full cost is in year 0
+             amortized_upfront_cost = capital_cost if calculation_year_index == 0 else 0.0
+        # If lifespan < 0, treat as 0 cost (or raise error, but 0 is safer)
         
-        # Annual maintenance cost (applied every year including year 0)
-        maintenance_cost = scenario.infrastructure_cost * scenario.infrastructure_maintenance_percent
+        # Calculate Annual Maintenance Cost
+        # Based on initial charger_cost, increased annually
+        base_annual_maintenance = scenario.charger_cost * maintenance_percent
+        current_annual_maintenance = base_annual_maintenance * ((1 + maintenance_increase_rate) ** calculation_year_index)
         
-        return upfront_cost + maintenance_cost
-        
-        # Removed previous logic based on infrastructure_lifespan
-        # Assumes maintenance is paid annually from year 0 onwards on the initial investment.
+        # Total cost is amortized capital plus current year's maintenance
+        total_annual_cost = amortized_upfront_cost + current_annual_maintenance
+        return total_annual_cost
 
 
 class BatteryReplacementCost(CostComponent):
     """Handles battery replacement costs for electric vehicles."""
-    
-    _replacement_occurred: bool = PrivateAttr(default=False) # Track if replacement happened to avoid multiple triggers
 
-    # Reset state if needed (e.g., if used across multiple scenarios/vehicles without re-instantiation)
-    # def reset(self): self._replacement_occurred = False 
-    
+    # _replacement_occurred: bool = PrivateAttr(default=False) # Track if replacement happened
+    def __init__(self):
+        """Initialize component state."""
+        self._replacement_occurred = False
+
+    def reset(self):
+        """Reset state for a new calculation run."""
+        self._replacement_occurred = False
+
     def calculate_annual_cost(
         self, year: int, vehicle: Vehicle, scenario: Scenario,
         calculation_year_index: int, total_mileage_km: float
     ) -> float:
         """Calculate battery replacement cost if triggered by forced year or degradation threshold."""
-        
+
         # Only applies to ElectricVehicles
         if not isinstance(vehicle, ElectricVehicle):
             return 0.0
-            
+
         # Prevent multiple replacements
         if self._replacement_occurred:
              return 0.0
@@ -228,23 +279,25 @@ class BatteryReplacementCost(CostComponent):
             logger.warning(f"BatteryReplacementCost: calculation_year_index {calculation_year_index} out of bounds for analysis_years {scenario.analysis_years}.")
             return 0.0
 
-        # 1. Check if forced replacement year matches current year (1-based index)
+        # --- Check for replacement trigger ---
+        trigger_replacement = False
+        reason = ""
+
+        # 1. Check forced replacement year
         if scenario.force_battery_replacement_year is not None and \
            scenario.force_battery_replacement_year == (calculation_year_index + 1):
-            replacement_cost = self._calculate_replacement_cost(year, vehicle, scenario)
-            logger.info(f"Battery replacement forced in year {year} (index {calculation_year_index}). Cost: {replacement_cost:.2f}")
-            self._replacement_occurred = True
-            return replacement_cost
+            trigger_replacement = True
+            reason = f"forced in year {calculation_year_index + 1}"
 
-        # 2. Check degradation threshold (only if force_replacement_year is not set or not met yet)
-        if scenario.force_battery_replacement_year is None and scenario.battery_replacement_threshold is not None:
-            # Calculate current battery capacity factor
-            # total_mileage_km is mileage *before* the start of the current year
-            current_mileage = total_mileage_km # Use mileage up to start of year
-            current_age_years = calculation_year_index # Age at start of year
-            
+        # 2. Check degradation threshold (only if not forced)
+        elif scenario.battery_replacement_threshold is not None:
+            # Calculate age and mileage at the END of the current year
+            age_at_year_end = calculation_year_index + 1
+            mileage_at_year_end = total_mileage_km + scenario.annual_mileage
+
             try:
-                capacity_factor = vehicle.calculate_battery_degradation_factor(current_age_years, current_mileage)
+                capacity_factor = vehicle.calculate_battery_degradation_factor(age_at_year_end, mileage_at_year_end)
+                logger.debug(f"Year index {calculation_year_index}: Age={age_at_year_end}, Mileage={mileage_at_year_end:.0f}, Capacity Factor={capacity_factor:.3f}")
             except AttributeError:
                 logger.error("Failed to calculate battery degradation. Vehicle object might be missing required methods or attributes.", exc_info=True)
                 return 0.0 # Avoid error propagation
@@ -254,10 +307,31 @@ class BatteryReplacementCost(CostComponent):
 
             # Trigger replacement if capacity factor drops below threshold
             if capacity_factor <= scenario.battery_replacement_threshold:
+                trigger_replacement = True
+                reason = f"threshold ({capacity_factor:.3f} <= {scenario.battery_replacement_threshold})"
+
+        # --- Calculate cost if replacement is triggered ---
+        if trigger_replacement:
+            age_at_replacement = calculation_year_index + 1 # Age at end of year when trigger happens
+
+            # Check if cost is covered by warranty
+            cost_covered_by_warranty = False
+            if hasattr(vehicle, 'battery_warranty_years') and vehicle.battery_warranty_years is not None:
+                # Warranty covers if failure occurs AT or BEFORE warranty expiration age
+                if age_at_replacement <= vehicle.battery_warranty_years:
+                    cost_covered_by_warranty = True
+                    logger.info(f"Battery replacement triggered ({reason}) in year index {calculation_year_index} (age {age_at_replacement}), but covered by warranty ({vehicle.battery_warranty_years} years).")
+
+            # Mark replacement as occurred regardless of warranty coverage
+            self._replacement_occurred = True
+
+            if not cost_covered_by_warranty:
                 replacement_cost = self._calculate_replacement_cost(year, vehicle, scenario)
-                logger.info(f"Battery replacement triggered by threshold ({scenario.battery_replacement_threshold:.1%}) in year {year} (index {calculation_year_index}). Capacity factor: {capacity_factor:.1%}. Cost: {replacement_cost:.2f}")
-                self._replacement_occurred = True
+                logger.info(f"Battery replacement triggered ({reason}) in year index {calculation_year_index} (age {age_at_replacement}). Cost: {replacement_cost:.2f}")
                 return replacement_cost
+            else:
+                # Replacement needed but covered by warranty, cost is 0 for TCO
+                return 0.0
 
         # No replacement in this year
         return 0.0
@@ -287,15 +361,33 @@ class InsuranceCost(CostComponent):
         """Calculate insurance cost based on vehicle price, base rate (% from vehicle), and scenario increase rate."""
         increase_rate = scenario.insurance_increase_rate
         
-        # Access base rate (as % of purchase price) from vehicle object
-        try:
-            base_insurance_percent = vehicle.insurance_cost_percent
-        except AttributeError:
-             logger.warning(f"Vehicle {vehicle.name} missing 'insurance_cost_percent' attribute. Using fallback 0.")
-             base_insurance_percent = 0.0
+        # Access base rate (% of purchase price) from vehicle object
+        # try:
+        #     base_insurance_percent = vehicle.insurance_cost_percent
+        # except AttributeError:
+        #      logger.warning(f"Vehicle {vehicle.name} missing 'insurance_cost_percent' attribute. Using fallback 0.")
+        #      base_insurance_percent = 0.0
         
         # Calculate base annual insurance cost
-        base_annual_cost = vehicle.purchase_price * base_insurance_percent
+        # base_annual_cost = vehicle.purchase_price * base_insurance_percent
+        
+        # --- REVISED LOGIC based on tests/scenario fields ---
+        # Use scenario base rate, vehicle-type factor, and increase rate.
+        base_rate = scenario.insurance_base_rate
+        factor = 1.0 # Default factor
+        if isinstance(vehicle, ElectricVehicle):
+            factor = scenario.electric_insurance_cost_factor
+        elif isinstance(vehicle, DieselVehicle):
+            factor = scenario.diesel_insurance_cost_factor
+        # Else: Keep factor = 1.0 for unsupported/mock vehicles, or raise error?
+        # For now, assume base rate * factor applies, needing vehicle.purchase_price.
+        
+        # Ensure vehicle has purchase_price attribute
+        if not hasattr(vehicle, 'purchase_price'):
+             logger.error(f"Cannot calculate insurance cost: Vehicle {vehicle.name} missing 'purchase_price' attribute.")
+             return 0.0 # Avoid error
+        
+        base_annual_cost = vehicle.purchase_price * base_rate * factor
         
         # Apply annual increase rate
         current_year_cost = base_annual_cost * ((1 + increase_rate) ** calculation_year_index)
@@ -309,16 +401,20 @@ class RegistrationCost(CostComponent):
         self, year: int, vehicle: Vehicle, scenario: Scenario,
         calculation_year_index: int, total_mileage_km: float
     ) -> float:
-        """Calculate registration cost based on vehicle base cost and scenario increase rate."""
+        """Calculate registration cost based on scenario base cost and increase rate."""
         increase_rate = scenario.registration_increase_rate
         
         # Access base cost directly from vehicle object
-        try:
-            base_registration_cost = vehicle.registration_cost
-        except AttributeError:
-            logger.warning(f"Vehicle {vehicle.name} missing 'registration_cost' attribute. Using fallback 0.")
-            base_registration_cost = 0.0
+        # try:
+        #     base_registration_cost = vehicle.registration_cost
+        # except AttributeError:
+        #     logger.warning(f"Vehicle {vehicle.name} missing 'registration_cost' attribute. Using fallback 0.")
+        #     base_registration_cost = 0.0
 
+        # --- REVISED LOGIC based on tests/scenario fields ---
+        # Use the annual_registration_cost from the scenario directly.
+        base_registration_cost = scenario.annual_registration_cost
+        
         # Apply annual increase rate
         current_year_cost = base_registration_cost * ((1 + increase_rate) ** calculation_year_index)
         return current_year_cost
