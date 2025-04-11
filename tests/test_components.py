@@ -38,51 +38,83 @@ class MockVehicle(Vehicle):
 
 @pytest.fixture
 def sample_scenario_params():
-    """Provides a dictionary of parameters for a sample Scenario."""
-    start_year = 2025
-    end_year = 2030 # Shorter period for simpler testing
-    analysis_period = end_year - start_year + 1
+    """Provides baseline parameters that might be found in a scenario YAML."""
+    # Note: This fixture represents raw data that might feed into Scenario creation,
+    # including potentially redundant fields used to construct nested objects later.
     return {
-        "name": "Component Test Scenario",
-        "start_year": start_year,
-        "end_year": end_year,
-        "discount_rate": 0.05,
-        "inflation_rate": 0.02,
-        "financing_method": "loan", # Default to loan for testing acquisition
-        "loan_term": 5,
-        "interest_rate": 0.06,
-        "down_payment_pct": 0.2,
+        "name": "Test Scenario",
+        "start_year": 2025, # Kept for fixture context if needed by tests
+        "end_year": 2030,   # Kept for fixture context
+        "analysis_years": 6, # Derived: end - start + 1
+        "discount_rate_real": 0.05,
         "annual_mileage": 50000.0,
-        "electricity_prices": {str(y): 0.20 + 0.01 * (y - start_year) for y in range(start_year, end_year + 1)},
-        "diesel_prices": {str(y): 1.80 + 0.02 * (y - start_year) for y in range(start_year, end_year + 1)},
-        "charger_cost": 40000.0,
-        "charger_installation_cost": 10000.0,
-        "charger_lifespan": 10,
-        "electric_maintenance_cost_per_km": 0.07,
-        "diesel_maintenance_cost_per_km": 0.14,
-        "electric_insurance_cost_factor": 1.1,
-        "diesel_insurance_cost_factor": 1.0,
-        "annual_registration_cost": 4500.0,
-        "enable_battery_replacement": True, # Enable for testing
-        "battery_replacement_year": 2028, # Example fixed year
-        "battery_replacement_threshold": 0.7, # Example threshold
-        # Add required vehicle params even though vehicle objects are separate
+        
+        # --- Fields used to construct ElectricVehicle ---
         "electric_vehicle_name": "Test EV",
         "electric_vehicle_price": 350000.0,
-        "electric_vehicle_battery_capacity": 250.0,
-        "electric_vehicle_energy_consumption": 0.8,
-        "electric_vehicle_battery_warranty": 8,
+        "electric_vehicle_lifespan": 6, # Assumed match analysis years here
         "electric_residual_value_pct": 0.15,
+        "electric_maintenance_cost_per_km": 0.07, # Added missing
+        "electric_insurance_cost_percent": 0.03, # Added missing
+        "electric_registration_cost": 500.0,   # Added missing
+        "electric_vehicle_battery_capacity": 250.0,
+        "electric_vehicle_energy_consumption": 0.8, # kWh/km
+        "electric_vehicle_battery_warranty": 8,
+        "electric_battery_replacement_cost_per_kwh": 100.0, # Added missing
+        "electric_battery_cycle_life": 1800, # Added missing (example)
+        "electric_battery_depth_of_discharge": 0.8, # Added missing (example)
+        "electric_charging_efficiency": 0.9, # Added missing (example)
+
+        # --- Fields used to construct DieselVehicle ---
         "diesel_vehicle_name": "Test Diesel",
         "diesel_vehicle_price": 180000.0,
-        "diesel_vehicle_fuel_consumption": 28.0,
-        "diesel_residual_value_pct": 0.12
+        "diesel_vehicle_lifespan": 6, # Assumed match analysis years here
+        "diesel_residual_value_pct": 0.12,
+        "diesel_maintenance_cost_per_km": 0.14, # Added missing
+        "diesel_insurance_cost_percent": 0.04, # Added missing
+        "diesel_registration_cost": 700.0,   # Added missing
+        "diesel_vehicle_fuel_consumption": 28.0, # L/100km
+        "diesel_co2_emission_factor": 2.68, # Added missing
+
+        # --- Scenario-level cost parameters ---
+        "infrastructure_cost": 45000.0,
+        "infrastructure_maintenance_percent": 0.01,
+        "battery_degradation_rate": 0.02, # May be informational
+        "battery_replacement_threshold": 0.7,
+        "force_battery_replacement_year": None, # Changed from battery_replacement_year
+        "electricity_price": 0.22,
+        "diesel_price": 1.80,
+        "carbon_tax_rate": 25.0,
+        "road_user_charge": 0.03,
+        "electricity_price_increase": 0.02,
+        "diesel_price_increase": 0.01,
+        "carbon_tax_increase_rate": 0.03,
+        "road_user_charge_increase_rate": 0.01,
+        "maintenance_increase_rate": 0.015,
+        "insurance_increase_rate": 0.01,
+        "registration_increase_rate": 0.01,
+        "include_carbon_tax": True,
+        "include_road_user_charge": True,
+        "battery_cost_projections": {2025: 110, 2028: 95, 2030: 85} # Example override
     }
 
 @pytest.fixture
-def sample_scenario(sample_scenario_params):
+def sample_scenario(sample_scenario_params, sample_electric_vehicle, sample_diesel_vehicle):
     """Creates a sample Scenario instance."""
-    return Scenario(**sample_scenario_params)
+    # Create a copy of params and add the vehicle instances
+    scenario_params = sample_scenario_params.copy()
+    
+    # Remove vehicle-specific params that aren't needed for Scenario creation
+    # but keep the ones needed at the Scenario level
+    vehicle_prefixes = [
+        "electric_vehicle_", "electric_", "diesel_vehicle_", "diesel_"
+    ]
+    
+    # Add the vehicle instances to the parameters
+    scenario_params["electric_vehicle"] = sample_electric_vehicle
+    scenario_params["diesel_vehicle"] = sample_diesel_vehicle
+    
+    return Scenario(**scenario_params)
 
 @pytest.fixture
 def sample_electric_vehicle(sample_scenario_params):
@@ -96,7 +128,16 @@ def sample_electric_vehicle(sample_scenario_params):
         "battery_warranty_years": sample_scenario_params["electric_vehicle_battery_warranty"],
         "annual_mileage": sample_scenario_params["annual_mileage"],
         "lifespan": sample_scenario_params["end_year"] - sample_scenario_params["start_year"] + 1, # Match scenario length
-        "residual_value_pct": sample_scenario_params["electric_residual_value_pct"]
+        "residual_value_pct": sample_scenario_params["electric_residual_value_pct"],
+        # Add missing required fields
+        "maintenance_cost_per_km": sample_scenario_params["electric_maintenance_cost_per_km"],
+        "insurance_cost_percent": sample_scenario_params["electric_insurance_cost_percent"],
+        "registration_cost": sample_scenario_params["electric_registration_cost"],
+        "battery_replacement_cost_per_kwh": sample_scenario_params["electric_battery_replacement_cost_per_kwh"],
+        # Add missing optional/EV-specific fields from params if needed for tests
+        "battery_cycle_life": sample_scenario_params["electric_battery_cycle_life"],
+        "battery_depth_of_discharge": sample_scenario_params["electric_battery_depth_of_discharge"],
+        "charging_efficiency": sample_scenario_params["electric_charging_efficiency"],
     }
     return ElectricVehicle(**ev_params)
 
@@ -109,7 +150,12 @@ def sample_diesel_vehicle(sample_scenario_params):
         "fuel_consumption_l_per_100km": sample_scenario_params["diesel_vehicle_fuel_consumption"],
         "annual_mileage": sample_scenario_params["annual_mileage"],
         "lifespan": sample_scenario_params["end_year"] - sample_scenario_params["start_year"] + 1,
-        "residual_value_pct": sample_scenario_params["diesel_residual_value_pct"]
+        "residual_value_pct": sample_scenario_params["diesel_residual_value_pct"],
+        # Add missing required fields
+        "maintenance_cost_per_km": sample_scenario_params["diesel_maintenance_cost_per_km"],
+        "insurance_cost_percent": sample_scenario_params["diesel_insurance_cost_percent"],
+        "registration_cost": sample_scenario_params["diesel_registration_cost"],
+        "co2_emission_factor": sample_scenario_params["diesel_co2_emission_factor"],
     }
     return DieselVehicle(**dv_params)
 
@@ -231,7 +277,7 @@ def test_energy_cost_electric(energy_cost, sample_electric_vehicle, sample_scena
     total_mileage = scenario.annual_mileage * calc_year_index
     
     # Expected calculation: annual_mileage * consumption_per_km * price_for_year
-    price_kwh = scenario.electricity_prices[str(year)]
+    price_kwh = scenario.get_annual_price('electricity', calc_year_index)
     expected_cost = scenario.annual_mileage * vehicle.energy_consumption_kwh_per_km * price_kwh
     
     calculated_cost = energy_cost.calculate_annual_cost(year, vehicle, scenario, calc_year_index, total_mileage)
@@ -246,7 +292,7 @@ def test_energy_cost_diesel(energy_cost, sample_diesel_vehicle, sample_scenario)
     total_mileage = scenario.annual_mileage * calc_year_index
     
     # Expected calculation: annual_mileage * consumption_per_km * price_for_year
-    price_l = scenario.diesel_prices[str(year)]
+    price_l = scenario.get_annual_price('diesel', calc_year_index)
     expected_cost = scenario.annual_mileage * vehicle.fuel_consumption_l_per_km * price_l
     
     calculated_cost = energy_cost.calculate_annual_cost(year, vehicle, scenario, calc_year_index, total_mileage)

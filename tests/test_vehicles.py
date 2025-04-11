@@ -11,13 +11,19 @@ def electric_vehicle_params():
     return {
         "name": "Test EV",
         "purchase_price": 350000.0,
+        "lifespan": 15,
+        "residual_value_pct": 0.15,
+        "maintenance_cost_per_km": 0.07,
+        "insurance_cost_percent": 0.03,
+        "registration_cost": 500.0,
         "battery_capacity_kwh": 250.0,
         "energy_consumption_kwh_per_km": 0.8,
         "battery_warranty_years": 8,
-        "annual_mileage": 50000.0, # Still needed for base class init, though scenario might override
-        "lifespan": 15,
-        "residual_value_pct": 0.15,
-        "extra_param": "value" # Test handling of kwargs
+        "battery_replacement_cost_per_kwh": 100.0,
+        "battery_cycle_life": 1800,
+        "battery_depth_of_discharge": 0.8,
+        "charging_efficiency": 0.9,
+        "extra_param": "value"
     }
 
 @pytest.fixture
@@ -26,10 +32,13 @@ def diesel_vehicle_params():
     return {
         "name": "Test Diesel",
         "purchase_price": 180000.0,
-        "fuel_consumption_l_per_100km": 28.0,
-        "annual_mileage": 50000.0, # Still needed for base class init
         "lifespan": 15,
         "residual_value_pct": 0.12,
+        "maintenance_cost_per_km": 0.14,
+        "insurance_cost_percent": 0.04,
+        "registration_cost": 700.0,
+        "fuel_consumption_l_per_100km": 28.0,
+        "co2_emission_factor": 2.68,
         "another_param": 123
     }
 

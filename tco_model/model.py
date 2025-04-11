@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 
 # Import necessary classes from sibling modules
-from .scenario import Scenario
+from .scenarios import Scenario
 from .vehicles import Vehicle, ElectricVehicle, DieselVehicle
 from .components import (
     CostComponent, AcquisitionCost, EnergyCost, MaintenanceCost,

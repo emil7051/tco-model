@@ -1,5 +1,8 @@
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel, Field, validator, model_validator, PrivateAttr
+from pydantic import (
+    BaseModel, Field, validator, model_validator, PrivateAttr,
+    field_validator, ValidationInfo, ConfigDict
+)
 import yaml
 import os
 import logging
@@ -22,6 +25,7 @@ class Scenario(BaseModel):
     name: str = Field(default="Default Scenario", description="Unique identifier for the scenario")
     description: Optional[str] = Field(None, description="Optional description")
     analysis_years: int = Field(..., description="Duration of the analysis in years", gt=0)
+    start_year: int = Field(2025, description="Starting year for the analysis")
 
     # Economic
     discount_rate_real: float = Field(..., description="Real annual discount rate (e.g., 0.03 for 3%)", ge=0)
@@ -33,9 +37,16 @@ class Scenario(BaseModel):
     electric_vehicle: ElectricVehicle
     diesel_vehicle: DieselVehicle
 
+    # Financing Options
+    financing_method: str = Field("loan", description="Method of vehicle acquisition (cash or loan)")
+    down_payment_pct: float = Field(0.2, description="Down payment percentage for loan financing", ge=0, le=1.0)
+    loan_term: int = Field(5, description="Loan term in years", gt=0)
+    interest_rate: float = Field(0.05, description="Annual interest rate for loan", ge=0)
+
     # Infrastructure (EV Specific)
     infrastructure_cost: float = Field(0.0, description="Upfront infrastructure cost (e.g., charger, installation) (AUD)", ge=0)
     infrastructure_maintenance_percent: float = Field(0.01, description="Annual infrastructure maintenance as a percentage of upfront cost", ge=0)
+    infrastructure_lifespan: int = Field(10, description="Lifespan of the infrastructure in years", gt=0)
 
     # --- Base Prices / Rates (Year 0) ---
     electricity_price: float = Field(..., description="Initial electricity price (AUD/kWh)", ge=0)
@@ -55,6 +66,7 @@ class Scenario(BaseModel):
     # --- Flags / Options ---
     include_carbon_tax: bool = Field(True, description="Include carbon tax in calculations for applicable vehicles")
     include_road_user_charge: bool = Field(True, description="Include road user charge in calculations")
+    enable_battery_replacement: bool = Field(True, description="Enable battery replacement logic")
 
     # Battery Replacement (EV Specific)
     battery_degradation_rate: float = Field(0.02, description="Annual battery capacity degradation rate (used for replacement logic)", ge=0, le=1.0)
@@ -68,6 +80,23 @@ class Scenario(BaseModel):
     # Optional: Cache for battery costs loaded from external file could be added here if needed Scenario-wide
     # _battery_costs_lookup: Dict[int, float] = PrivateAttr(default_factory=dict)
 
+    # --- Add missing fields previously handled by kwargs or assumed --- 
+    # These should match fields expected by components, but might not be directly on Scenario
+    # if they are better suited to be on Vehicle. Check component logic.
+    # Example (these were previously assumed or passed via kwargs in tests):
+    battery_cost_projections: Optional[Dict[int, float]] = Field(None, description="Optional override for battery cost projections (Year: AUD/kWh)")
+
+    # Use ConfigDict for Pydantic v2 configuration
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
+    
+    # Add computed property for end_year
+    @property
+    def end_year(self) -> int:
+        """Calculate the end year from start_year and analysis_years."""
+        return self.start_year + self.analysis_years - 1
+
     @model_validator(mode='after')
     def _calculate_annual_prices(self) -> 'Scenario':
         """Generate annual price series for relevant costs after model initialization."""
@@ -77,8 +106,10 @@ class Scenario(BaseModel):
             'carbon_tax': (self.carbon_tax_rate, self.carbon_tax_increase_rate),
             'road_user_charge': (self.road_user_charge, self.road_user_charge_increase_rate)
         }
-        self._generated_prices = {}
+        self._generated_prices = {} # Ensure cache is cleared before recalculation
         for name, (base_price, increase_rate) in prices_to_generate.items():
+            # For all price types, use the same consistent formula:
+            # Year i price = base_price * (1 + increase_rate)^i
             self._generated_prices[name] = [
                 base_price * ((1 + increase_rate) ** i) for i in range(self.analysis_years)
             ]
@@ -106,12 +137,15 @@ class Scenario(BaseModel):
             logger.warning(f"Cost type '{cost_type}' not found in generated price series for scenario '{self.name}'. Available: {list(self._generated_prices.keys())}")
         return None
 
-    @validator('force_battery_replacement_year')
-    def check_replacement_year_bounds(cls, v, values):
+    # Use field_validator for Pydantic v2
+    @field_validator('force_battery_replacement_year')
+    @classmethod
+    def check_replacement_year_bounds(cls, v: Optional[int], info: ValidationInfo):
         """Ensure forced replacement year is within analysis period."""
-        if v is not None and 'analysis_years' in values:
-            if v > values['analysis_years']:
-                raise ValueError(f"force_battery_replacement_year ({v}) cannot be greater than analysis_years ({values['analysis_years']})")
+        # 'values' is deprecated, use info.data
+        if v is not None and 'analysis_years' in info.data and info.data['analysis_years'] is not None:
+            if v > info.data['analysis_years']:
+                raise ValueError(f"force_battery_replacement_year ({v}) cannot be greater than analysis_years ({info.data['analysis_years']})")
         return v
 
     @classmethod
@@ -164,13 +198,36 @@ class Scenario(BaseModel):
 
         Handles updates to top-level fields and nested vehicle dictionaries.
         Ensures the new instance is validated and price series are regenerated.
-        """
 
+        Args:
+            **kwargs: Keyword arguments of parameters to update.
+
+        Returns:
+            A new Scenario instance with the modifications applied.
+
+        Raises:
+            ValueError: If modifications can't be applied.
+        """
         # Use Pydantic's recommended way for creating a modified copy
-        # This automatically handles validation and runs model_validator again.
         try:
-            # model_copy generates a new instance with updated fields
+            # Create a new instance with updated fields
             new_instance = self.model_copy(update=kwargs)
+            
+            # Explicitly ensure price series are regenerated if price-related parameters are changed
+            # This is needed because while model_copy runs model_validator for basic validation,
+            # it might not fully regenerate all derived values like price series with the new parameters
+            price_related_params = {
+                'electricity_price', 'electricity_price_increase',
+                'diesel_price', 'diesel_price_increase',
+                'carbon_tax_rate', 'carbon_tax_increase_rate',
+                'road_user_charge', 'road_user_charge_increase_rate'
+            }
+            
+            # If any price-related parameter was modified, explicitly recalculate prices
+            # This ensures that the price series in _generated_prices are consistent with the new parameters
+            if any(param in kwargs for param in price_related_params):
+                new_instance._calculate_annual_prices()
+                
             logger.debug(f"Created modified scenario based on '{self.name}'. Updates: {kwargs}")
             return new_instance
         except Exception as e:
