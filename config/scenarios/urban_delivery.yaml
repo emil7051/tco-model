@@ -7,6 +7,11 @@ discount_rate_real: 0.05 # Example real discount rate
 
 # Operational
 annual_mileage: 40000 # km/year
+electric_maintenance_cost_per_km: 0.06 # Added back - Required by Scenario model
+diesel_maintenance_cost_per_km: 0.12 # Added back - Required by Scenario model
+# electric_maintenance_cost_per_km: 0.06 # Removed - Moved back into EV block
+# diesel_maintenance_cost_per_km: 0.12 # Removed - Moved back into Diesel block
+annual_registration_cost: 0 # AUD/year (base year) - Added top-level field (Placeholder, review if needed)
 
 # Electric Vehicle
 # Using nested structure based on tco_model.vehicles.ElectricVehicle
@@ -14,12 +19,12 @@ electric_vehicle:
   name: "Urban Delivery EV (Default)"
   purchase_price: 350000 # AUD
   residual_value_percent: 0.15 # Proportion of purchase price after analysis_years
-  energy_consumption: 0.9 # kWh/km
-  maintenance_cost_per_km: 0.06 # AUD/km (base year)
+  energy_consumption_kwh_per_km: 0.9 # kWh/km - Renamed from energy_consumption
+  maintenance_cost_per_km: 0.06 # AUD/km (base year) - Moved back into block
   insurance_cost_percent: 0.02 # % of purchase price (base year)
-  registration_cost: 1500 # AUD/year (base year)
+  registration_cost: 1500 # AUD/year (base year) - Kept for now, check if needed alongside top-level
   battery_capacity_kwh: 300 # kWh
-  # battery_replacement_cost_per_kwh: # Not needed here, component loads from config/defaults/battery_costs.yaml
+  battery_replacement_cost_per_kwh: 150 # AUD/kWh - Added missing field (Placeholder value)
   battery_cycle_life: 2500 # Cycles
   battery_depth_of_discharge: 0.85 # DoD
   charging_efficiency: 0.92 # Grid-to-battery efficiency
@@ -30,10 +35,10 @@ diesel_vehicle:
   name: "Urban Delivery Diesel (Default)"
   purchase_price: 200000 # AUD
   residual_value_percent: 0.12 # Proportion of purchase price after analysis_years
-  energy_consumption: 0.30 # L/km (Note: vehicle model expects L/km, original scenario had L/100km)
-  maintenance_cost_per_km: 0.12 # AUD/km (base year)
+  fuel_consumption_l_per_100km: 30.0 # L/100km - Renamed from energy_consumption & converted from 0.3 L/km
+  maintenance_cost_per_km: 0.12 # AUD/km (base year) - Moved back into block
   insurance_cost_percent: 0.025 # % of purchase price (base year)
-  registration_cost: 2500 # AUD/year (base year)
+  registration_cost: 2500 # AUD/year (base year) - Kept for now, check if needed alongside top-level
   co2_emission_factor: 2.68 # kg CO2e/L
 
 # Infrastructure (EV)
