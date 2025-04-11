@@ -1,0 +1,18 @@
+# Battery cost projections (AUD/kWh)
+baseline:
+  2025: 170
+  2030: 100
+  2035: 75
+  2040: 60
+
+conservative:
+  2025: 200
+  2030: 130
+  2035: 100
+  2040: 80
+
+optimistic:
+  2025: 150
+  2030: 80
+  2035: 60
+  2040: 45

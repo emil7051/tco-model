@@ -1,0 +1,50 @@
+# data/vehicle_specs.yaml
+# Example vehicle specifications (Australian context)
+
+# --- Electric Vehicles ---
+ev_models:
+  - name: "Urban Delivery Van EV"
+    purchase_price: 85000 # AUD
+    residual_value_percent: 0.35
+    energy_consumption: 0.30 # kWh/km
+    maintenance_cost_per_km: 0.04 # AUD/km
+    insurance_cost_percent: 0.025 # Annual % of purchase price
+    registration_cost: 450 # AUD/year (often lower for EVs)
+    battery_capacity_kwh: 90
+    # battery_replacement_cost_per_kwh: See battery_costs.yaml
+    battery_cycle_life: 2000
+    battery_depth_of_discharge: 0.85
+    charging_efficiency: 0.92
+
+  - name: "Light Commercial Truck EV"
+    purchase_price: 120000 # AUD
+    residual_value_percent: 0.30
+    energy_consumption: 0.45 # kWh/km
+    maintenance_cost_per_km: 0.05 # AUD/km
+    insurance_cost_percent: 0.03 # Annual % of purchase price
+    registration_cost: 500 # AUD/year
+    battery_capacity_kwh: 150
+    # battery_replacement_cost_per_kwh: See battery_costs.yaml
+    battery_cycle_life: 2500
+    battery_depth_of_discharge: 0.90
+    charging_efficiency: 0.90
+
+# --- Diesel Vehicles ---
+diesel_models:
+  - name: "Urban Delivery Van Diesel"
+    purchase_price: 65000 # AUD
+    residual_value_percent: 0.30
+    energy_consumption: 0.12 # L/km
+    maintenance_cost_per_km: 0.06 # AUD/km
+    insurance_cost_percent: 0.03 # Annual % of purchase price
+    registration_cost: 750 # AUD/year
+    co2_emission_factor: 2.68 # kg CO2e/L (Standard diesel factor)
+
+  - name: "Light Commercial Truck Diesel"
+    purchase_price: 90000 # AUD
+    residual_value_percent: 0.28
+    energy_consumption: 0.18 # L/km
+    maintenance_cost_per_km: 0.08 # AUD/km
+    insurance_cost_percent: 0.035 # Annual % of purchase price
+    registration_cost: 900 # AUD/year
+    co2_emission_factor: 2.68 # kg CO2e/L 
