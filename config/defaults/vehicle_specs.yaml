@@ -1,6 +1,21 @@
 # data/vehicle_specs.yaml
 # Example vehicle specifications (Australian context)
 
+defaults:
+  ev:
+    name: "EV Default"
+    purchase_price: 400000.0 # AUD
+    battery_capacity_kwh: 300.0 # kWh
+    energy_consumption: 0.7 # kWh/km
+    battery_warranty_years: 8 # years
+    # Note: Other EV defaults like residual_value_percent, maintenance, insurance, etc., 
+    # could also be added here if needed, following the structure of ev_models.
+  diesel:
+    name: "Diesel Default"
+    purchase_price: 200000.0 # AUD
+    energy_consumption: 0.286 # L/km (Converted from 28.6 L/100km)
+    # Note: Other Diesel defaults could be added here.
+
 # --- Electric Vehicles ---
 ev_models:
   - name: "Urban Delivery Van EV"

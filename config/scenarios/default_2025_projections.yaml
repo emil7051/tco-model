@@ -1,158 +1,180 @@
-name: Default Scenario 2025 Projections
-description: Default TCO scenario using projections starting from 2025 based on updated_data.
-analysis_years: 15
-start_year: 2025
-discount_rate_real: 0.07
-inflation_rate: 0.025
-annual_mileage: 40000  # Representative urban delivery mileage
+name: Default Scenario 2025 Projections - Refactored
+description: Default TCO scenario using projections starting from 2025, refactored structure.
+analysis_period_years: 15
+analysis_start_year: 2025
 
-financing_method: loan
-down_payment_pct: 0.20
-loan_term: 5
-interest_rate: 0.07
+# --- Economic Parameters ---
+economic_parameters:
+  discount_rate_percent_real: 7.0 # Assuming 0.07 -> 7.0 %
+  inflation_rate_percent: 2.5 # Assuming 0.025 -> 2.5 %
+
+# --- Operational Parameters ---
+operational_parameters:
+  annual_mileage_km: 40000
+
+# --- Financing Options ---
+financing_options:
+  financing_method: loan
+  down_payment_percent: 20.0 # Assuming 0.20 -> 20.0 %
+  loan_term_years: 5
+  loan_interest_rate_percent: 7.0 # Assuming 0.07 -> 7.0 %
 
 # --- Vehicle Definitions ---
 electric_vehicle:
   name: Electric Rigid Truck (Default)
   vehicle_type: rigid
-  purchase_price: 400000
-  lifespan: 15
-  residual_value_projections: # Based on rigid_bet midpoints
-    5: 0.45  # Avg of [0.40, 0.50]
-    10: 0.25 # Avg of [0.20, 0.30]
-    15: 0.125 # Avg of [0.10, 0.15]
-  registration_cost: 5000 # From insurance_and_registration data
-  purchase_price_annual_decrease_real: 0.02
+  base_purchase_price_aud: 400000 # Renamed
+  lifespan_years: 15 # Renamed
+  residual_value_percent_projections: # Renamed
+    5: 0.45
+    10: 0.25
+    15: 0.125
+  base_registration_cost_aud: 5000 # Renamed
+  purchase_price_annual_decrease_rate_real: 0.02 # Renamed
   # Battery Details
-  battery_capacity_kwh: 300 # Representative capacity
-  energy_consumption_kwh_per_km: 0.70 # Based on rigid urban avg (70 kWh/100km)
-  battery_warranty_years: 8 # Common default
-  battery_pack_cost_projections_aud_per_kwh: # From updated_data
+  battery_capacity_kwh: 300
+  energy_consumption_kwh_per_km: 0.70
+  battery_warranty_years: 8
+  battery_pack_cost_aud_per_kwh_projections: # Renamed
     2025: 170
     2030: 100
     2035: 75
     2040: 60
-  battery_cycle_life: 1500 # Default assumption
-  battery_depth_of_discharge: 0.8 # Default assumption
-  charging_efficiency: 0.9 # Default assumption
+  battery_cycle_life: 1500
+  battery_depth_of_discharge_percent: 80.0 # Renamed & Scaled (0.8 -> 80.0)
+  charging_efficiency_percent: 90.0 # Renamed & Scaled (0.9 -> 90.0)
 
 diesel_vehicle:
   name: Diesel Rigid Truck (Default)
   vehicle_type: rigid
-  purchase_price: 200000
-  lifespan: 15
-  residual_value_projections: # Based on rigid_diesel midpoints
-    5: 0.55  # Avg of [0.50, 0.60]
-    10: 0.35 # Avg of [0.30, 0.40]
-    15: 0.20  # Avg of [0.15, 0.25]
-  registration_cost: 5000 # From insurance_and_registration data
+  base_purchase_price_aud: 200000 # Renamed
+  lifespan_years: 15 # Renamed
+  residual_value_percent_projections: # Renamed
+    5: 0.55
+    10: 0.35
+    15: 0.20
+  base_registration_cost_aud: 5000 # Renamed
   # Fuel Details
-  fuel_consumption_l_per_100km: 28.6 # Based on rigid urban avg
-  co2_emission_factor: 2.68 # Standard kg CO2e per litre diesel
+  fuel_consumption_l_per_100km: 28.6 # Unchanged
+  co2_emission_factor_kg_per_l: 2.68 # Renamed
 
-# --- Infrastructure Costs --- (From updated_data)
+# --- Infrastructure Costs ---
 infrastructure_costs:
-  charger_hardware:
-    dc_fast_150kw: 50000
-    high_power_350kw_plus: 150000
-  total_per_truck: # Provide a single value for the model, user can adjust
-    min: 100000 # Placeholder, needs refinement on how to handle range/selection in model/UI
-    max: 150000 # Placeholder
-  # Simplified for model input - using average assumptions
-  selected_charger_cost: 50000 # Example: Using 150kW charger cost
-  selected_installation_cost: 55000 # Example: Midpoint of installation range
-  charger_maintenance_percent: 0.015 # From maintenance data
-  charger_lifespan: 10 # Default assumption, not in updated_data
+  # charger_hardware_costs_aud: # Optional field, can add if needed
+  #   dc_fast_150kw: 50000
+  #   high_power_350kw_plus: 150000
+  selected_charger_cost_aud: 50000 # Renamed
+  selected_installation_cost_aud: 55000 # Renamed
+  charger_maintenance_annual_rate_percent: 1.5 # Renamed & Scaled (0.015 -> 1.5)
+  charger_lifespan_years: 10 # Renamed
 
-# --- Price Projections & Selections --- (From updated_data)
+# --- Price Projections & Selections ---
 electricity_price_projections:
-  average_flat_rate:
-    2025: [0.30, 0.40]
-    2030: [0.28, 0.38]
-    2035: [0.26, 0.36]
-    2040: [0.25, 0.35]
-  off_peak_tou:
-    2025: [0.15, 0.25]
-    2030: [0.13, 0.22]
-    2035: [0.11, 0.20]
-    2040: [0.10, 0.18]
-  ev_plan_low:
-    2025: 0.08
-    2030: 0.07
-    2035: 0.06
-    2040: 0.05
-  ev_plan_high:
-    2025: 0.15
-    2030: 0.13
-    2035: 0.11
-    2040: 0.10
+  selected_scenario_name: average_flat_rate # Renamed field
+  scenarios:
+    - name: average_flat_rate
+      prices:
+        2025: { price_aud_per_kwh_or_range: [0.30, 0.40] } # Nested structure
+        2030: { price_aud_per_kwh_or_range: [0.28, 0.38] }
+        2035: { price_aud_per_kwh_or_range: [0.26, 0.36] }
+        2040: { price_aud_per_kwh_or_range: [0.25, 0.35] }
+    - name: off_peak_tou
+      prices:
+        2025: { price_aud_per_kwh_or_range: [0.15, 0.25] }
+        2030: { price_aud_per_kwh_or_range: [0.13, 0.22] }
+        2035: { price_aud_per_kwh_or_range: [0.11, 0.20] }
+        2040: { price_aud_per_kwh_or_range: [0.10, 0.18] }
+    - name: ev_plan_low
+      prices:
+        2025: { price_aud_per_kwh_or_range: 0.08 }
+        2030: { price_aud_per_kwh_or_range: 0.07 }
+        2035: { price_aud_per_kwh_or_range: 0.06 }
+        2040: { price_aud_per_kwh_or_range: 0.05 }
+    - name: ev_plan_high
+      prices:
+        2025: { price_aud_per_kwh_or_range: 0.15 }
+        2030: { price_aud_per_kwh_or_range: 0.13 }
+        2035: { price_aud_per_kwh_or_range: 0.11 }
+        2040: { price_aud_per_kwh_or_range: 0.10 }
 
-diesel_price_scenarios:
-  baseline_2025: 1.85
-  low_stable:
-    2025: 1.85
-    2030: 1.85
-    2035: 1.85
-    2040: 1.85
-  medium_increase:
-    2025: 1.85
-    2030: 2.10
-    2035: 2.35
-    2040: 2.60
-  high_increase:
-    2025: 1.85
-    2030: 2.40
-    2035: 2.90
-    2040: 3.40
+diesel_price_projections:
+  selected_scenario_name: medium_increase # Renamed field
+  scenarios:
+    - name: baseline_2025
+      data: { price_aud_per_l_or_projection: 1.85 } # Nested structure
+    - name: low_stable
+      data: # Nested structure
+        price_aud_per_l_or_projection:
+          2025: 1.85
+          2030: 1.85
+          2035: 1.85
+          2040: 1.85
+    - name: medium_increase
+      data: # Nested structure
+        price_aud_per_l_or_projection:
+          2025: 1.85
+          2030: 2.10
+          2035: 2.35
+          2040: 2.60
+    - name: high_increase
+      data: # Nested structure
+        price_aud_per_l_or_projection:
+          2025: 1.85
+          2030: 2.40
+          2035: 2.90
+          2040: 3.40
 
-selected_electricity_scenario: average_flat_rate # Default selection
-selected_diesel_scenario: medium_increase # Default selection
-
-# --- Detailed Maintenance Costs --- (From updated_data)
+# --- Detailed Maintenance Costs ---
 maintenance_costs_detailed:
   rigid_bet:
-    annual_min: 500
-    annual_max: 1000
+    annual_cost_min_aud: 500 # Renamed key
+    annual_cost_max_aud: 1000 # Renamed key
     notes: "Mainly checks, fluids, filters"
   articulated_bet:
-    annual_min: 700
-    annual_max: 1500
+    annual_cost_min_aud: 700 # Renamed key
+    annual_cost_max_aud: 1500 # Renamed key
     notes: "Higher complexity/scale"
   rigid_diesel:
-    annual_min: 1500
-    annual_max: 3000
+    annual_cost_min_aud: 1500 # Renamed key
+    annual_cost_max_aud: 3000 # Renamed key
     notes: "Includes oil/filter changes, emissions system"
   articulated_diesel:
-    annual_min: 2500
-    annual_max: 5000
+    annual_cost_min_aud: 2500 # Renamed key
+    annual_cost_max_aud: 5000 # Renamed key
     notes: "More frequent/complex servicing"
 
-# --- Insurance and Registration --- (From updated_data)
-insurance_and_registration:
-  insurance:
-    electric_prime_mover: 20000 # Note: Data specific to prime mover, using as proxy for rigid
-    diesel_prime_mover: 10000 # Note: Data specific to prime mover, using as proxy for rigid
-    notes: "Based on vehicle value"
-  registration:
-    electric: 5000
-    diesel: 5000
-    notes: "Similar for both types"
+# --- Insurance and Registration Costs ---
+insurance_registration_costs:
+  electric:
+    base_annual_cost_aud: 20000 # Using prime mover data as proxy - needs review
+    cost_type: fixed # Assuming fixed based on old structure, or potentially percentage_of_value?
+    # annual_rate_percent_of_value: 1.5 # Add this if cost_type is percentage_of_value
+  diesel:
+    base_annual_cost_aud: 10000 # Using prime mover data as proxy - needs review
+    cost_type: fixed
+    # annual_rate_percent_of_value: 1.0
 
-# --- Other Costs & Rates ---
-carbon_tax_rate: 30.00 # From default_parameters
-carbon_tax_increase_rate: 0.05 # From default_parameters
-road_user_charge: 0.0 # Default
-road_user_charge_increase_rate: 0.0 # Default
+# --- Carbon Tax Configuration ---
+carbon_tax_config:
+  include_carbon_tax: True # Renamed
+  initial_rate_aud_per_tonne_co2e: 30.00 # Renamed
+  annual_increase_rate_percent: 5.0 # Renamed & Scaled (0.05 -> 5.0)
 
-# --- General Cost Increase Rates (Apply to costs not covered by projections) ---
-maintenance_increase_rate: 0.025 # Assume matches inflation
-insurance_increase_rate: 0.025 # Assume matches inflation
-registration_increase_rate: 0.025 # Assume matches inflation
+# --- Road User Charge Configuration ---
+road_user_charge_config:
+  include_road_user_charge: False # Renamed (was True but rate was 0)
+  initial_charge_aud_per_km: 0.0 # Renamed
+  annual_increase_rate_percent: 0.0 # Renamed
 
-# --- Flags / Options ---
-include_carbon_tax: True
-include_road_user_charge: False # Default as base rate is 0
-enable_battery_replacement: True
-battery_degradation_rate: 0.02 # From default_parameters
-battery_replacement_threshold: 0.70 # From default_parameters
-force_battery_replacement_year: null # Default 
+# --- General Cost Increase Rates ---
+general_cost_increase_rates:
+  maintenance_annual_increase_rate_percent: 2.5 # Renamed & Scaled (0.025 -> 2.5)
+  insurance_annual_increase_rate_percent: 2.5 # Renamed & Scaled (0.025 -> 2.5)
+  registration_annual_increase_rate_percent: 2.5 # Renamed & Scaled (0.025 -> 2.5)
+
+# --- Battery Replacement Configuration ---
+battery_replacement_config:
+  enable_battery_replacement: True # Renamed
+  annual_degradation_rate_percent: 2.0 # Renamed & Scaled (0.02 -> 2.0)
+  replacement_threshold_fraction: 0.70 # Renamed (threshold is fraction 0-1)
+  force_replacement_year_index: null # Renamed (index is 0-based) 

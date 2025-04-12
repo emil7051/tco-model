@@ -1,0 +1,8 @@
+# config/defaults/infrastructure.yaml
+# Default infrastructure parameters
+
+charger:
+  cost: 50000.0 # AUD
+  installation_cost: 55000.0 # AUD
+  lifespan_years: 10 # years
+  maintenance_cost_percent: 1.5 # % of capital cost per year 

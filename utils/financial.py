@@ -8,22 +8,35 @@ This module includes functions for:
 - Other financial utility functions
 """
 # Standard library imports
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, NewType, Union, TypedDict
 
 # Third-party imports
 import numpy as np
 
 # Application-specific imports
 from config.constants import DEFAULT_PAYMENT_FREQUENCY, PAYMENTS_PER_YEAR
-from utils.conversions import percentage_to_decimal
+from utils.conversions import percentage_to_decimal, Decimal, Percentage # Import custom types
 
+# Custom Types for Financial Domain
+AUD = NewType('AUD', float)
+Years = NewType('Years', int)
+Rate = NewType('Rate', float) # Generic rate, could be interest or discount
+PaymentFrequency = NewType('PaymentFrequency', str) # e.g., 'monthly', 'annually'
+PeriodNumber = NewType('PeriodNumber', int)
+
+class LoanPaymentDetails(TypedDict):
+    period: PeriodNumber
+    payment: AUD
+    principal: AUD
+    interest: AUD
+    remaining_principal: AUD
 
 def calculate_loan_payment(
-    principal: float,
-    interest_rate: float,
-    loan_term_years: int,
-    payment_frequency: str = DEFAULT_PAYMENT_FREQUENCY
-) -> float:
+    principal: AUD,
+    interest_rate: Percentage,
+    loan_term_years: Years,
+    payment_frequency: PaymentFrequency = PaymentFrequency(DEFAULT_PAYMENT_FREQUENCY)
+) -> AUD:
     """
     Calculate regular loan payment using the PMT formula.
     
@@ -36,35 +49,36 @@ def calculate_loan_payment(
     Returns:
         Regular payment amount
     """
-    # Convert annual interest rate to decimal
-    r = percentage_to_decimal(interest_rate)
+    # Convert annual interest rate percentage to decimal rate
+    r_decimal: Decimal = percentage_to_decimal(interest_rate)
     
     # Determine number of payments based on frequency
-    payments_per_year = PAYMENTS_PER_YEAR.get(payment_frequency.lower(), 12)  # Default to monthly
+    payments_per_year: int = PAYMENTS_PER_YEAR.get(payment_frequency.lower(), 12)  # Default to monthly
     
     # Convert annual rate to rate per payment period
-    rate_per_period = r / payments_per_year
+    rate_per_period: Rate = Rate(r_decimal / payments_per_year)
     
     # Total number of payments
-    n_payments = loan_term_years * payments_per_year
+    n_payments: int = loan_term_years * payments_per_year
     
     # PMT formula: PMT = P * r * (1 + r)^n / ((1 + r)^n - 1)
     if rate_per_period == 0:
-        return principal / n_payments  # Simple division if rate is 0
+        # Simple division if rate is 0
+        return AUD(principal / n_payments) 
     
     numerator = rate_per_period * (1 + rate_per_period)**n_payments
     denominator = (1 + rate_per_period)**n_payments - 1
-    payment = principal * (numerator / denominator)
+    payment: float = principal * (numerator / denominator)
     
-    return payment
+    return AUD(payment)
 
 
 def calculate_loan_schedule(
-    principal: float,
-    interest_rate: float,
-    loan_term_years: int,
-    payment_frequency: str = DEFAULT_PAYMENT_FREQUENCY
-) -> List[Dict]:
+    principal: AUD,
+    interest_rate: Percentage,
+    loan_term_years: Years,
+    payment_frequency: PaymentFrequency = PaymentFrequency(DEFAULT_PAYMENT_FREQUENCY)
+) -> List[LoanPaymentDetails]:
     """
     Generate a complete loan amortization schedule.
     
@@ -75,58 +89,64 @@ def calculate_loan_schedule(
         payment_frequency: Frequency of payments ('monthly', 'quarterly', 'annually')
         
     Returns:
-        List of dictionaries with payment details for each period
+        List of dictionaries (LoanPaymentDetails) with payment details for each period
     """
     # Calculate the regular payment amount
-    payment = calculate_loan_payment(principal, interest_rate, loan_term_years, payment_frequency)
+    regular_payment: AUD = calculate_loan_payment(principal, interest_rate, loan_term_years, payment_frequency)
     
-    # Convert annual interest rate to decimal
-    r = percentage_to_decimal(interest_rate)
+    # Convert annual interest rate percentage to decimal rate
+    r_decimal: Decimal = percentage_to_decimal(interest_rate)
     
     # Determine number of payments based on frequency
-    payments_per_year = PAYMENTS_PER_YEAR.get(payment_frequency.lower(), 12)  # Default to monthly
+    payments_per_year: int = PAYMENTS_PER_YEAR.get(payment_frequency.lower(), 12)  # Default to monthly
     
     # Convert annual rate to rate per payment period
-    rate_per_period = r / payments_per_year
+    rate_per_period: Rate = Rate(r_decimal / payments_per_year)
     
     # Total number of payments
-    n_payments = loan_term_years * payments_per_year
+    n_payments: int = loan_term_years * payments_per_year
     
     # Initialize variables
-    remaining_principal = principal
-    schedule = []
+    remaining_principal: AUD = principal
+    schedule: List[LoanPaymentDetails] = []
     
     # Generate the schedule
-    for period in range(1, n_payments + 1):
+    for period_num in range(1, n_payments + 1):
         # Calculate interest for this period
-        interest_payment = remaining_principal * rate_per_period
+        interest_payment: AUD = AUD(remaining_principal * rate_per_period)
         
         # Calculate principal portion of payment
-        principal_payment = payment - interest_payment
+        principal_payment: AUD = AUD(regular_payment - interest_payment)
         
         # Adjust for final payment rounding issues
-        if period == n_payments:
-            principal_payment = remaining_principal
-            payment = principal_payment + interest_payment
-        
-        # Update remaining principal
-        remaining_principal -= principal_payment
-        if remaining_principal < 0:
-            remaining_principal = 0
+        current_payment = regular_payment
+        if period_num == n_payments:
+            # Ensure final principal payment clears the balance exactly
+            principal_payment = remaining_principal 
+            # Adjust final payment amount based on recalculated principal
+            current_payment = AUD(principal_payment + interest_payment)
+            remaining_principal = AUD(0.0)
+        else:
+             # Update remaining principal normally
+            remaining_principal = AUD(remaining_principal - principal_payment)
+            # Ensure principal doesn't go negative due to potential float issues
+            if remaining_principal < 0:
+                remaining_principal = AUD(0.0)
         
         # Add to schedule
-        schedule.append({
-            'period': period,
-            'payment': payment,
+        payment_details: LoanPaymentDetails = {
+            'period': PeriodNumber(period_num),
+            'payment': current_payment,
             'principal': principal_payment,
             'interest': interest_payment,
             'remaining_principal': remaining_principal
-        })
+        }
+        schedule.append(payment_details)
     
     return schedule
 
 
-def calculate_npv(cash_flows: List[float], discount_rate: float) -> float:
+def calculate_npv(cash_flows: List[AUD], discount_rate: Percentage) -> AUD:
     """
     Calculate Net Present Value (NPV) of a series of cash flows.
     
@@ -137,18 +157,16 @@ def calculate_npv(cash_flows: List[float], discount_rate: float) -> float:
     Returns:
         Net Present Value
     """
-    # Convert discount rate to decimal
-    r = percentage_to_decimal(discount_rate)
+    # Convert discount rate percentage to decimal rate
+    r_decimal: Decimal = percentage_to_decimal(discount_rate)
     
-    # Calculate NPV
-    npv = 0
-    for i, cf in enumerate(cash_flows):
-        npv += cf / (1 + r) ** i
+    # Calculate NPV using list comprehension for conciseness
+    npv_float: float = sum(cf / (1 + r_decimal) ** i for i, cf in enumerate(cash_flows))
     
-    return npv
+    return AUD(npv_float)
 
 
-def calculate_irr(cash_flows: List[float]) -> Optional[float]:
+def calculate_irr(cash_flows: List[AUD]) -> Optional[Percentage]:
     """
     Calculate Internal Rate of Return (IRR) of a series of cash flows.
     
@@ -160,19 +178,28 @@ def calculate_irr(cash_flows: List[float]) -> Optional[float]:
     """
     try:
         # Use numpy's IRR function
-        irr = np.irr(cash_flows)
+        # Convert AUD list to simple list of floats for numpy
+        cash_flows_float = [float(cf) for cf in cash_flows]
+        irr_decimal: float = np.irr(cash_flows_float)
+        
+        # Check if irr result is valid (numpy might return nan)
+        if np.isnan(irr_decimal) or np.isinf(irr_decimal):
+             return None
         
         # Convert to percentage
-        return irr * 100
-    except:
+        return Percentage(irr_decimal * 100.0)
+    except ValueError: # Catch numpy's specific error for invalid cash flows
+        return None
+    except Exception: # Catch any other unexpected errors
+        # Consider logging the error here
         return None
 
 
 def calculate_straight_line_depreciation(
-    cost: float,
-    salvage_value: float,
-    useful_life_years: int
-) -> Tuple[float, List[float]]:
+    cost: AUD,
+    salvage_value: AUD,
+    useful_life_years: Years
+) -> Tuple[AUD, List[AUD]]:
     """
     Calculate straight-line depreciation.
     
@@ -182,30 +209,38 @@ def calculate_straight_line_depreciation(
         useful_life_years: Useful life in years
         
     Returns:
-        Tuple of (annual_depreciation, list_of_book_values)
+        Tuple of (annual_depreciation, list_of_book_values for years 0 to useful_life_years)
     """
+    if useful_life_years <= 0:
+        # Handle invalid useful life
+        return AUD(0.0), [cost]
+        
     # Calculate annual depreciation
-    annual_depreciation = (cost - salvage_value) / useful_life_years
+    depreciable_amount: AUD = AUD(cost - salvage_value)
+    # Ensure depreciable amount is not negative
+    depreciable_amount = max(AUD(0.0), depreciable_amount)
+    annual_depreciation: AUD = AUD(depreciable_amount / useful_life_years)
     
-    # Calculate book value for each year
-    book_values = []
-    remaining_value = cost
+    # Calculate book value for each year (including year 0)
+    book_values: List[AUD] = []
+    current_book_value: AUD = cost
     
-    for _ in range(useful_life_years + 1):
-        book_values.append(remaining_value)
-        remaining_value -= annual_depreciation
-        # Ensure we don't depreciate below salvage value
-        if remaining_value < salvage_value:
-            remaining_value = salvage_value
+    for year in range(useful_life_years + 1):
+        book_values.append(current_book_value)
+        # Only depreciate if not the last value (which is already appended)
+        if year < useful_life_years:
+            current_book_value = AUD(current_book_value - annual_depreciation)
+            # Ensure we don't depreciate below salvage value
+            current_book_value = max(salvage_value, current_book_value)
     
     return annual_depreciation, book_values
 
 
 def calculate_residual_value(
-    initial_value: float,
-    age_years: int,
-    depreciation_rate: float
-) -> float:
+    initial_value: AUD,
+    age_years: Years,
+    depreciation_rate: Percentage
+) -> AUD:
     """
     Calculate residual value using exponential depreciation.
     
@@ -217,30 +252,34 @@ def calculate_residual_value(
     Returns:
         Residual value
     """
-    # Convert depreciation rate to decimal
-    r = percentage_to_decimal(depreciation_rate)
+    # Convert depreciation rate percentage to decimal rate
+    r_decimal: Decimal = percentage_to_decimal(depreciation_rate)
     
     # Calculate residual value: V = V₀ * (1 - r)^t
-    residual_value = initial_value * (1 - r) ** age_years
+    # Ensure the rate is capped at 100% (decimal 1.0)
+    effective_rate = min(r_decimal, Decimal(1.0))
+    residual_value_float: float = initial_value * (1 - effective_rate) ** age_years
     
-    return residual_value
+    # Ensure residual value is not negative
+    return AUD(max(0.0, residual_value_float))
 
 
 def calculate_levelized_cost(
-    total_costs: float,
-    total_output: float
-) -> float:
+    total_costs: AUD, # Should be the Net Present Value of all costs
+    total_output: float # e.g., total km, total kWh (undiscounted)
+) -> float: # Cost per unit of output (e.g., AUD/km, AUD/kWh)
     """
     Calculate the levelized cost (e.g., per km, per kWh).
     
     Args:
-        total_costs: Total discounted costs over the analysis period
+        total_costs: Total discounted costs (NPV) over the analysis period
         total_output: Total undiscounted output (e.g., km traveled, kWh produced)
         
     Returns:
-        Levelized cost per unit of output
+        Levelized cost per unit of output (float, as units might vary)
     """
     if total_output == 0:
-        return float('inf')  # Avoid division by zero
+        return float('inf')  # Avoid division by zero, represent as infinity
     
-    return total_costs / total_output
+    # The result is cost per unit, so it's a float, not necessarily AUD
+    return float(total_costs / total_output)

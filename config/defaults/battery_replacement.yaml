@@ -1,0 +1,6 @@
+# config/defaults/battery_replacement.yaml
+# Default parameters for battery replacement logic
+
+replacement:
+  default_replacement_year: 8 # Default year index when battery replacement occurs
+  capacity_threshold_percent: 70.0 # Default % capacity threshold for triggering replacement 
