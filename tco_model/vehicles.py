@@ -1,25 +1,40 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, Literal
 from pydantic import (
-    BaseModel, Field, model_validator, ValidationInfo, ConfigDict # Added model_validator, ConfigDict
+    BaseModel, Field, model_validator, ValidationInfo, ConfigDict, field_validator # Added field_validator
 )
 
 class Vehicle(BaseModel, ABC):
     """Abstract base class for all vehicle types, using Pydantic."""
     
-    name: str
-    purchase_price: float = Field(..., gt=0)
-    lifespan: int = Field(default=15, gt=0)
-    residual_value_pct: float = Field(default=0.1, ge=0, le=1.0)
+    name: str = Field(..., description="Unique identifier for the vehicle.")
+    vehicle_type: Literal["rigid", "articulated"] = Field(..., description="Type of heavy vehicle.")
+    purchase_price: float = Field(..., gt=0, description="Initial purchase price in AUD.")
+    lifespan: int = Field(..., gt=0, description="Expected operational lifespan in years.")
+    residual_value_projections: Dict[int, float] = Field(
+        ..., 
+        description="Residual value percentage at specific years (e.g., {5: 0.5, 10: 0.3, 15: 0.15})", 
+        json_schema_extra={"example": {5: 0.5, 10: 0.3, 15: 0.15}}
+    )
     # Cost fields common to both or handled by components accessing vehicle data
-    maintenance_cost_per_km: float = Field(..., ge=0) 
-    insurance_cost_percent: float = Field(..., ge=0) # Annual insurance cost as % of purchase price
-    registration_cost: float = Field(..., ge=0) # Annual registration cost
+    registration_cost: float = Field(..., ge=0, description="Base annual registration cost in AUD.")
 
     # Allow extra fields passed via kwargs to be stored but not validated strictly here
     model_config = ConfigDict(
         extra = 'allow' # Allow other fields passed in kwargs
     )
+
+    @field_validator('residual_value_projections')
+    @classmethod
+    def check_residual_percentages(cls, v: Dict[int, float]):
+        """Validate that all residual value percentages are between 0.0 and 1.0."""
+        if not v: # Allow empty dict if that's valid, or raise if not
+            # raise ValueError("Residual value projections cannot be empty.") # Uncomment if empty is invalid
+            return v # Assuming empty is ok for now
+        for year, pct in v.items():
+            if not (0.0 <= pct <= 1.0):
+                raise ValueError(f"Residual value percentage must be between 0.0 and 1.0, got {pct} for year {year}")
+        return v
 
     # Property to access extra fields
     @property
@@ -65,28 +80,64 @@ class Vehicle(BaseModel, ABC):
     
     def calculate_residual_value(self, age_years: int) -> float:
         """
-        Calculate residual value at a given age.
-        Assumes linear depreciation towards the final residual value percentage.
-        
+        Calculate residual value at a given age using interpolation based on projections.
+
         Args:
             age_years: Vehicle age in years
-            
+
         Returns:
             Residual value in AUD
         """
         if age_years < 0:
-            # Pydantic validation should ideally catch this if age_years is a validated input
-            # But keep check for direct method calls
-            raise ValueError("Age must be non-negative.") 
-        if age_years >= self.lifespan:
-            return self.purchase_price * self.residual_value_pct
-            
-        # Linear depreciation model for simplicity
-        # Avoid division by zero if lifespan is somehow 0 (though validation prevents it)
-        if self.lifespan == 0: return self.purchase_price 
-        
-        depreciation_rate = (1.0 - self.residual_value_pct) / self.lifespan
-        current_value_pct = max(0.0, 1.0 - (depreciation_rate * age_years)) # Ensure value doesn't go below 0 due to float precision
+            raise ValueError("Age must be non-negative.")
+
+        # Sort the projection years
+        sorted_years = sorted(self.residual_value_projections.keys())
+
+        if not sorted_years:
+            # Fallback to simple linear depreciation to 0 if no projections provided (or handle as error)
+            # For now, let's assume projections are always provided by the Scenario loader.
+            # A validator could enforce this.
+            # As a simple fallback: linear depreciation to 0 over lifespan
+            # effective_lifespan = max(1, self.lifespan) # Avoid division by zero
+            # depreciation_rate = 1.0 / effective_lifespan
+            # current_value_pct = max(0.0, 1.0 - (depreciation_rate * age_years))
+            # return self.purchase_price * current_value_pct
+            raise ValueError("Residual value projections are required but missing.")
+
+
+        # Find the relevant projection points for interpolation or extrapolation
+        if age_years <= sorted_years[0]:
+            # Before the first projection point: Interpolate between purchase price (year 0, 100%) and the first point
+            year1, pct1 = 0, 1.0
+            year2, pct2 = sorted_years[0], self.residual_value_projections[sorted_years[0]]
+        elif age_years >= sorted_years[-1]:
+            # After the last projection point: Use the last point's value
+            # Or could extrapolate, but holding the last value is safer.
+            return self.purchase_price * self.residual_value_projections[sorted_years[-1]]
+        else:
+            # Between two projection points: Interpolate
+            # Find the two points surrounding the age
+            for i in range(len(sorted_years) - 1):
+                if sorted_years[i] <= age_years < sorted_years[i+1]:
+                    year1, pct1 = sorted_years[i], self.residual_value_projections[sorted_years[i]]
+                    year2, pct2 = sorted_years[i+1], self.residual_value_projections[sorted_years[i+1]]
+                    break
+            else:
+                # Should not happen if age_years is within the overall range and < last point
+                 return self.purchase_price * self.residual_value_projections[sorted_years[-1]] # Fallback
+
+
+        # Linear interpolation: pct = pct1 + (age_years - year1) * (pct2 - pct1) / (year2 - year1)
+        # Avoid division by zero if years are the same (shouldn't happen with sorted distinct years)
+        if year2 == year1:
+            current_value_pct = pct1 # or pct2, they should be the same
+        else:
+            current_value_pct = pct1 + (age_years - year1) * (pct2 - pct1) / (year2 - year1)
+
+        # Ensure percentage is within [0, 1] bounds
+        current_value_pct = max(0.0, min(1.0, current_value_pct))
+
         return self.purchase_price * current_value_pct
 
 
@@ -97,10 +148,11 @@ class ElectricVehicle(Vehicle):
     energy_consumption_kwh_per_km: float = Field(..., gt=0)
     battery_warranty_years: int = Field(default=8, ge=0)
     # EV Specific Cost/Parameter fields
-    battery_replacement_cost_per_kwh: float = Field(..., ge=0)
+    battery_pack_cost_projections_aud_per_kwh: Dict[int, float] = Field(..., description="Projected battery pack cost per kWh by year (e.g., {2025: 170, 2030: 100})")
     battery_cycle_life: int = Field(default=1500, gt=0) # Typical cycles
     battery_depth_of_discharge: float = Field(default=0.8, ge=0, le=1.0)
     charging_efficiency: float = Field(default=0.9, gt=0, le=1.0)
+    purchase_price_annual_decrease_real: float = Field(default=0.0, description="Annual real decrease rate for purchase price (e.g., 0.02 for 2%)", ge=0)
     
     # Removed __init__, using Pydantic fields and inheriting from Vehicle
     

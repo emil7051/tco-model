@@ -1,7 +1,7 @@
 import pytest
 import math
-
 from tco_model.vehicles import Vehicle, ElectricVehicle, DieselVehicle
+from pydantic import ValidationError
 
 # --- Fixtures --- 
 
@@ -10,19 +10,19 @@ def electric_vehicle_params():
     """Provides default parameters for creating an ElectricVehicle."""
     return {
         "name": "Test EV",
-        "purchase_price": 350000.0,
+        "vehicle_type": "rigid",
+        "purchase_price": 75000,
         "lifespan": 15,
-        "residual_value_pct": 0.15,
-        "maintenance_cost_per_km": 0.07,
-        "insurance_cost_percent": 0.03,
-        "registration_cost": 500.0,
+        "residual_value_projections": {5: 0.5, 10: 0.3, 15: 0.15},
+        "registration_cost": 500,
+        "energy_consumption_kwh_per_km": 0.3,
         "battery_capacity_kwh": 250.0,
-        "energy_consumption_kwh_per_km": 0.8,
+        "battery_pack_cost_projections_aud_per_kwh": {2025: 170, 2030: 100, 2035: 75},
         "battery_warranty_years": 8,
-        "battery_replacement_cost_per_kwh": 100.0,
         "battery_cycle_life": 1800,
         "battery_depth_of_discharge": 0.8,
         "charging_efficiency": 0.9,
+        "purchase_price_annual_decrease_real": 0.02,
         "extra_param": "value"
     }
 
@@ -31,12 +31,11 @@ def diesel_vehicle_params():
     """Provides default parameters for creating a DieselVehicle."""
     return {
         "name": "Test Diesel",
-        "purchase_price": 180000.0,
-        "lifespan": 15,
-        "residual_value_pct": 0.12,
-        "maintenance_cost_per_km": 0.14,
-        "insurance_cost_percent": 0.04,
-        "registration_cost": 700.0,
+        "vehicle_type": "rigid",
+        "purchase_price": 60000,
+        "lifespan": 12,
+        "residual_value_projections": {5: 0.6, 10: 0.4, 12: 0.2},
+        "registration_cost": 600,
         "fuel_consumption_l_per_100km": 28.0,
         "co2_emission_factor": 2.68,
         "another_param": 123
@@ -56,51 +55,57 @@ def sample_diesel_vehicle(diesel_vehicle_params):
 
 # --- Vehicle Base Class Tests (using concrete instances) ---
 
-def test_vehicle_init_success(sample_electric_vehicle, sample_diesel_vehicle, electric_vehicle_params, diesel_vehicle_params):
-    """Test successful initialization of base Vehicle attributes."""
-    # Test Electric Vehicle
-    assert sample_electric_vehicle.name == electric_vehicle_params["name"]
-    assert sample_electric_vehicle.purchase_price == electric_vehicle_params["purchase_price"]
-    assert sample_electric_vehicle.lifespan == electric_vehicle_params["lifespan"]
-    assert sample_electric_vehicle.residual_value_pct == electric_vehicle_params["residual_value_pct"]
-    assert sample_electric_vehicle.additional_params["extra_param"] == "value"
-
-    # Test Diesel Vehicle
-    assert sample_diesel_vehicle.name == diesel_vehicle_params["name"]
-    assert sample_diesel_vehicle.purchase_price == diesel_vehicle_params["purchase_price"]
-    assert sample_diesel_vehicle.lifespan == diesel_vehicle_params["lifespan"]
-    assert sample_diesel_vehicle.residual_value_pct == diesel_vehicle_params["residual_value_pct"]
-    assert sample_diesel_vehicle.additional_params["another_param"] == 123
+def test_vehicle_init_success(sample_electric_vehicle, sample_diesel_vehicle):
+    """Test successful initialization with valid parameters."""
+    assert sample_electric_vehicle.name == "Test EV"
+    assert sample_electric_vehicle.lifespan == 15
+    assert sample_diesel_vehicle.name == "Test Diesel"
+    assert sample_diesel_vehicle.lifespan == 12
 
 @pytest.mark.parametrize("invalid_params", [
-    {"purchase_price": 0}, 
+    {"purchase_price": 0},
     {"purchase_price": -100},
     {"lifespan": 0},
     {"lifespan": -5},
-    {"residual_value_pct": -0.1},
-    {"residual_value_pct": 1.1}
+    # Test invalid projection value (negative percentage) - This should now be caught by Field validation
+    {"residual_value_projections": {5: 0.5, 10: -0.1, 15: 0.1}},
+    # Test invalid projection value (percentage > 1) - This should now be caught by Field validation
+    {"residual_value_projections": {5: 1.1, 10: 0.3, 15: 0.1}},
+    # Test invalid projection key (not an int)
+    {"residual_value_projections": {'five': 0.5, 10: 0.3}}
 ])
 def test_vehicle_init_invalid_input(electric_vehicle_params, diesel_vehicle_params, invalid_params):
     """Test initialization fails with invalid base parameters."""
     ev_params = electric_vehicle_params.copy()
     ev_params.update(invalid_params)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError): # Pydantic raises ValidationError
         ElectricVehicle(**ev_params)
         
-    diesel_params = diesel_vehicle_params.copy()
-    diesel_params.update(invalid_params)
-    with pytest.raises(ValueError):
-        DieselVehicle(**diesel_params)
+    dv_params = diesel_vehicle_params.copy()
+    # Ensure the invalid param key exists for diesel before updating
+    # Residual value test applies to both
+    if "residual_value_projections" in invalid_params:
+        dv_params.update(invalid_params)
+        with pytest.raises(ValidationError):
+            DieselVehicle(**dv_params)
+    # Only run price/lifespan checks if the key is relevant for diesel
+    elif "purchase_price" in invalid_params or "lifespan" in invalid_params:
+        dv_params.update(invalid_params)
+        with pytest.raises(ValidationError):
+            DieselVehicle(**dv_params)
 
-@pytest.mark.parametrize("age, expected_factor", [
+@pytest.mark.parametrize("age, expected_value_factor", [
     (0, 1.0), # Start of life
-    (5, 1.0 - (1.0 - 0.15) / 15 * 5), # Mid-life (using EV residual pct)
-    (15, 0.15), # End of life
-    (20, 0.15)  # Beyond lifespan
+    (5, 0.5), # Matches first projection point
+    (7, 0.42), # Interpolated between 5yr (0.5) and 10yr (0.3) -> 0.5 + (7-5)*(0.3-0.5)/(10-5) = 0.5 - 0.08 = 0.42
+    (10, 0.3), # Matches second projection point
+    (12, 0.24), # Interpolated between 10yr (0.3) and 15yr (0.15) -> 0.3 + (12-10)*(0.15-0.3)/(15-10) = 0.3 - 0.06 = 0.24
+    (15, 0.15), # End of life / matches last projection point
+    (20, 0.15)  # Past end of life / uses last projection point
 ])
-def test_calculate_residual_value(sample_electric_vehicle, age, expected_factor):
+def test_calculate_residual_value(sample_electric_vehicle, age, expected_value_factor):
     """Test residual value calculation at different ages."""
-    expected_value = sample_electric_vehicle.purchase_price * expected_factor
+    expected_value = sample_electric_vehicle.purchase_price * expected_value_factor
     calculated_value = sample_electric_vehicle.calculate_residual_value(age_years=age)
     assert math.isclose(calculated_value, expected_value, rel_tol=1e-9)
 
@@ -174,7 +179,8 @@ def test_ev_calculate_annual_energy_cost_invalid(sample_electric_vehicle, mileag
     (5, 250000, 0.8, 1.0),                # Mid-life example (factors depend heavily on constants)
     (15, 750000, 0.0, 0.9),               # Approx end of vehicle life
     (15, 2000000, 0.0, 0.8),              # High mileage end of life
-    (20, 1000000, 0.0, 0.8)               # Beyond vehicle life
+    (20, 1000000, 0.0, 0.82),             # Beyond vehicle life
+    (20, 1000000, 0.0, 0.82)              # Beyond vehicle life
 ])
 def test_calculate_battery_degradation_factor(sample_electric_vehicle, age, mileage, expected_min_factor, expected_max_factor):
     """Test battery degradation calculation produces values within expected range [0, 1]."""

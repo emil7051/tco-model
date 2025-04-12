@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Type
 import numpy as np # Needed for financial calculations like PMT
 import numpy_financial as npf # Import the financial functions
 import logging
 from pydantic import PrivateAttr
+import math
 
 # Import utility for data loading
 from utils.data_handlers import load_battery_costs
@@ -17,20 +18,26 @@ logger = logging.getLogger(__name__)
 # Global variable to cache battery costs (simple cache)
 _cached_battery_costs: Optional[Dict[int, float]] = None
 
-def get_battery_cost_per_kwh(year: int, scenario: Scenario) -> float:
-    """Gets the battery cost per kWh for a given year from scenario or cached data.
+def get_battery_cost_per_kwh(year: int, scenario: Scenario, vehicle: Optional[Vehicle] = None) -> float:
+    """Gets the battery cost per kWh for a given year.
+    Prioritizes vehicle projections, then scenario projections, then default cache/load.
     Uses simple interpolation/extrapolation if the exact year is not found.
-    Checks scenario.battery_cost_projections first.
     """
     global _cached_battery_costs
 
     costs = None
-    # Check if scenario provides specific projections
-    if hasattr(scenario, 'battery_cost_projections') and scenario.battery_cost_projections:
+
+    # 1. Check Vehicle object if it's an EV
+    if isinstance(vehicle, ElectricVehicle) and hasattr(vehicle, 'battery_pack_cost_projections_aud_per_kwh') and vehicle.battery_pack_cost_projections_aud_per_kwh:
+        costs = vehicle.battery_pack_cost_projections_aud_per_kwh
+        logger.debug(f"Using battery cost projections from vehicle '{vehicle.name}'.")
+
+    # 2. Check if scenario provides specific projections (less likely intended path)
+    if costs is None and hasattr(scenario, 'battery_cost_projections') and scenario.battery_cost_projections:
         costs = scenario.battery_cost_projections
-        logger.debug(f"Using battery cost projections provided in scenario '{scenario.name}'.")
-    
-    # If not in scenario, try loading from default and using cache
+        logger.debug(f"Using battery cost projections provided directly in scenario '{scenario.name}'.")
+
+    # 3. If not found on vehicle or scenario, try loading from default and using cache
     if costs is None:
         if _cached_battery_costs is None:
             logger.info("Attempting to load default battery costs (not provided in scenario). Cache empty.")
@@ -189,59 +196,82 @@ class EnergyCost(CostComponent):
 
 
 class MaintenanceCost(CostComponent):
-    """Handles maintenance and repair costs, applying annual increase."""
+    """Calculates annual maintenance costs."""
     
     def calculate_annual_cost(
         self, year: int, vehicle: Vehicle, scenario: Scenario,
         calculation_year_index: int, total_mileage_km: float
     ) -> float:
-        """Calculate maintenance cost based on annual mileage, vehicle base cost/km, and scenario increase rate."""
-        annual_mileage = scenario.annual_mileage
-        increase_rate = scenario.maintenance_increase_rate
-        
-        # Access base cost directly from vehicle object (now a required field)
-        base_cost_per_km = vehicle.maintenance_cost_per_km 
-        
-        # Calculate the cost for the current year, adjusting for the increase rate
-        # Cost for year = Annual Mileage * Base Cost/km * (1 + Increase Rate) ^ Year Index
-        current_year_cost_per_km = base_cost_per_km * ((1 + increase_rate) ** calculation_year_index)
-        return annual_mileage * current_year_cost_per_km
+        """
+        Calculates the maintenance cost for a given year.
+        Uses the detailed annual min/max from the scenario based on vehicle type.
+        Applies the annual maintenance increase rate.
+        """
+        # Determine vehicle type key suffix
+        type_suffix = "bet" if isinstance(vehicle, ElectricVehicle) else "diesel"
+        # Determine vehicle class key prefix (assuming 'rigid' or 'articulated')
+        class_prefix = getattr(vehicle, 'vehicle_type', 'rigid') # Default to rigid if type is missing
+        detail_key = f"{class_prefix}_{type_suffix}"
+
+        if detail_key not in scenario.maintenance_costs_detailed:
+            # logger.warning(f"MaintenanceCost: Detailed costs for '{detail_key}' not found in scenario. Returning 0.")
+            # return 0.0
+            # Raise KeyError if the specific key is missing
+            raise KeyError(f"MaintenanceCost: Detailed costs for key '{detail_key}' not found in scenario.maintenance_costs_detailed.")
+
+        maint_details = scenario.maintenance_costs_detailed[detail_key]
+        try:
+            # Use average of min/max for calculation
+            min_cost = float(maint_details.get('annual_min', 0))
+            max_cost = float(maint_details.get('annual_max', 0))
+            base_annual_cost = (min_cost + max_cost) / 2.0
+        except (TypeError, ValueError):
+             logger.error(f"MaintenanceCost: Invalid min/max values for '{detail_key}'. {maint_details}")
+             return 0.0 # Or raise error
+
+        # Apply annual increase rate
+        increase_factor = (1 + scenario.maintenance_increase_rate) ** calculation_year_index
+        adjusted_annual_cost = base_annual_cost * increase_factor
+        return adjusted_annual_cost
 
 
 class InfrastructureCost(CostComponent):
-    """Handles upfront and ongoing infrastructure costs (e.g., chargers)."""
+    """Calculates annual infrastructure costs (charger maintenance)."""
 
     def calculate_annual_cost(
         self, year: int, vehicle: Vehicle, scenario: Scenario,
         calculation_year_index: int, total_mileage_km: float
     ) -> float:
-        """Calculate infrastructure costs (amortized upfront + annual maintenance)."""
-        # This component should only apply to Electric Vehicles
+        """Calculates the annual charger maintenance cost, applying only to EVs."""
         if not isinstance(vehicle, ElectricVehicle):
-            return 0.0
+            return 0.0 # No infrastructure cost for non-EVs
 
-        # Use renamed charger attributes from scenario
-        capital_cost = scenario.charger_cost + scenario.charger_installation_cost
-        lifespan = scenario.charger_lifespan
-        maintenance_percent = scenario.charger_maintenance_percent # Annual % of initial charger_cost
-        # Assume infrastructure maintenance increases at same rate as general maintenance
-        maintenance_increase_rate = scenario.maintenance_increase_rate 
+        # Use simplified structure from scenario.infrastructure_costs
+        charger_lifespan = scenario.infrastructure_costs.get('charger_lifespan', 10) # Default 10
+        if calculation_year_index >= charger_lifespan:
+            return 0.0 # No maintenance after charger lifespan
 
+        capital_cost = scenario.infrastructure_costs.get('selected_charger_cost', 0) + \
+                       scenario.infrastructure_costs.get('selected_installation_cost', 0)
+        maintenance_rate = scenario.infrastructure_costs.get('charger_maintenance_percent', 0)
+        
+        # Maintenance cost doesn't typically escalate with a general rate in this model
+        # It's a fixed percentage of the initial capital cost.
         # Calculate amortized upfront cost for the current year
         amortized_upfront_cost = 0.0
-        if lifespan > 0:
+        if charger_lifespan > 0:
             # Cost applies during the charger's lifespan (years 0 to lifespan-1)
-            if 0 <= calculation_year_index < lifespan:
-                amortized_upfront_cost = capital_cost / lifespan
-        elif lifespan == 0:
+            if 0 <= calculation_year_index < charger_lifespan:
+                amortized_upfront_cost = capital_cost / charger_lifespan
+        elif charger_lifespan == 0:
              # If lifespan is 0, full cost is in year 0
              amortized_upfront_cost = capital_cost if calculation_year_index == 0 else 0.0
         # If lifespan < 0, treat as 0 cost (or raise error, but 0 is safer)
         
         # Calculate Annual Maintenance Cost
         # Based on initial charger_cost, increased annually
-        base_annual_maintenance = scenario.charger_cost * maintenance_percent
-        current_annual_maintenance = base_annual_maintenance * ((1 + maintenance_increase_rate) ** calculation_year_index)
+        base_annual_maintenance = capital_cost * maintenance_rate
+        current_annual_maintenance = base_annual_maintenance * ((1 + scenario.maintenance_increase_rate) ** calculation_year_index)
         
         # Total cost is amortized capital plus current year's maintenance
         total_annual_cost = amortized_upfront_cost + current_annual_maintenance
@@ -337,86 +367,58 @@ class BatteryReplacementCost(CostComponent):
         return 0.0
 
     def _calculate_replacement_cost(self, year: int, vehicle: ElectricVehicle, scenario: Scenario) -> float:
-        """Helper to calculate the actual cost of battery replacement."""
-        # Get cost per kWh for the replacement year
-        cost_per_kwh = get_battery_cost_per_kwh(year, scenario) 
-        
-        # Calculate total cost
-        # Ensure vehicle has the battery_capacity_kwh attribute
-        if hasattr(vehicle, 'battery_capacity_kwh'):
-             replacement_cost = vehicle.battery_capacity_kwh * cost_per_kwh
-             return replacement_cost
-        else:
-             logger.error(f"Cannot calculate battery replacement cost: Vehicle {vehicle.name} missing 'battery_capacity_kwh' attribute.")
-             return 0.0 # Avoid errors if attribute is missing
+        """Helper to calculate the battery replacement cost for a given year."""
+        # Get cost per kWh for the replacement year, passing the vehicle
+        cost_per_kwh = get_battery_cost_per_kwh(year, scenario, vehicle)
+        replacement_cost = vehicle.battery_capacity_kwh * cost_per_kwh
+        return replacement_cost
 
 
 class InsuranceCost(CostComponent):
-    """Handles annual insurance costs, based on vehicle price and increase rate."""
+    """Calculates annual insurance costs."""
 
     def calculate_annual_cost(
         self, year: int, vehicle: Vehicle, scenario: Scenario,
         calculation_year_index: int, total_mileage_km: float
     ) -> float:
-        """Calculate insurance cost based on vehicle price, base rate (% from vehicle), and scenario increase rate."""
-        increase_rate = scenario.insurance_increase_rate
-        
-        # Access base rate (% of purchase price) from vehicle object
-        # try:
-        #     base_insurance_percent = vehicle.insurance_cost_percent
-        # except AttributeError:
-        #      logger.warning(f"Vehicle {vehicle.name} missing 'insurance_cost_percent' attribute. Using fallback 0.")
-        #      base_insurance_percent = 0.0
-        
-        # Calculate base annual insurance cost
-        # base_annual_cost = vehicle.purchase_price * base_insurance_percent
-        
-        # --- REVISED LOGIC based on tests/scenario fields ---
-        # Use scenario base rate, vehicle-type factor, and increase rate.
-        base_rate = scenario.insurance_base_rate
-        factor = 1.0 # Default factor
-        if isinstance(vehicle, ElectricVehicle):
-            factor = scenario.electric_insurance_cost_factor
-        elif isinstance(vehicle, DieselVehicle):
-            factor = scenario.diesel_insurance_cost_factor
-        # Else: Keep factor = 1.0 for unsupported/mock vehicles, or raise error?
-        # For now, assume base rate * factor applies, needing vehicle.purchase_price.
-        
-        # Ensure vehicle has purchase_price attribute
-        if not hasattr(vehicle, 'purchase_price'):
-             logger.error(f"Cannot calculate insurance cost: Vehicle {vehicle.name} missing 'purchase_price' attribute.")
-             return 0.0 # Avoid error
-        
-        base_annual_cost = vehicle.purchase_price * base_rate * factor
-        
+        """
+        Calculates annual insurance cost based on vehicle purchase price, 
+        scenario base rate, vehicle-specific factor, and annual increase rate.
+        """
+        # Determine vehicle type key (use prime mover proxy for now)
+        # TODO: Refine key based on actual vehicle type (rigid/articulated) if data becomes available
+        ins_key = "electric_prime_mover" if isinstance(vehicle, ElectricVehicle) else "diesel_prime_mover"
+
+        try:
+            # Access nested insurance dictionary
+            base_annual_cost = float(scenario.insurance_and_registration['insurance'][ins_key])
+        except (KeyError, TypeError, ValueError):
+             logger.warning(f"InsuranceCost: Could not find or parse base insurance cost for key '{ins_key}' in scenario.insurance_and_registration. Returning 0.")
+             return 0.0
+
         # Apply annual increase rate
-        current_year_cost = base_annual_cost * ((1 + increase_rate) ** calculation_year_index)
-        return current_year_cost
+        increase_factor = (1 + scenario.insurance_increase_rate) ** calculation_year_index
+        adjusted_annual_cost = base_annual_cost * increase_factor
+        return adjusted_annual_cost
 
 
 class RegistrationCost(CostComponent):
-    """Handles annual vehicle registration costs, applying annual increase."""
+    """Calculates annual registration costs."""
     
     def calculate_annual_cost(
         self, year: int, vehicle: Vehicle, scenario: Scenario,
         calculation_year_index: int, total_mileage_km: float
     ) -> float:
-        """Calculate registration cost based on scenario base cost and increase rate."""
-        increase_rate = scenario.registration_increase_rate
-        
-        # Access base cost directly from vehicle object
-        # try:
-        #     base_registration_cost = vehicle.registration_cost
-        # except AttributeError:
-        #     logger.warning(f"Vehicle {vehicle.name} missing 'registration_cost' attribute. Using fallback 0.")
-        #     base_registration_cost = 0.0
+        """
+        Calculates annual registration cost based on scenario base rate and annual increase rate.
+        Assumes registration cost is the same for both vehicle types unless specified otherwise.
+        """
+        # Base cost now comes from the vehicle object itself
+        base_registration_cost = getattr(vehicle, 'registration_cost', 0)
 
-        # --- REVISED LOGIC based on tests/scenario fields ---
-        # Use the annual_registration_cost from the scenario directly.
-        base_registration_cost = scenario.annual_registration_cost
-        
         # Apply annual increase rate
-        current_year_cost = base_registration_cost * ((1 + increase_rate) ** calculation_year_index)
+        increase_factor = (1 + scenario.registration_increase_rate) ** calculation_year_index
+        current_year_cost = base_registration_cost * increase_factor
         return current_year_cost
 
 

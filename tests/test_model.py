@@ -12,64 +12,88 @@ def basic_scenario():
     # Define vehicle data as dicts first
     ev_data = {
         "name": "Test EV",
+        "vehicle_type": "rigid",
         "purchase_price": 60000,
         "lifespan": 12, # Example value
-        "residual_value_pct": 0.40, 
-        "maintenance_cost_per_km": 0.03, 
-        "insurance_cost_percent": 0.02, 
-        "registration_cost": 500, 
-        "energy_consumption_kwh_per_km": 0.25,  
+        "residual_value_projections": {5: 0.6, 10: 0.4, 12: 0.4}, # Example
+        "registration_cost": 500,
+        "energy_consumption_kwh_per_km": 0.25,
         "battery_capacity_kwh": 70,
-        "battery_replacement_cost_per_kwh": 100, 
+        "battery_pack_cost_projections_aud_per_kwh": {2025: 150, 2030: 90}, # Example
         "battery_warranty_years": 8, # Uses default if omitted
-        "battery_cycle_life": 1500, 
-        "battery_depth_of_discharge": 0.8, 
-        "charging_efficiency": 0.9 
+        "battery_cycle_life": 1500,
+        "battery_depth_of_discharge": 0.8,
+        "charging_efficiency": 0.9,
+        "purchase_price_annual_decrease_real": 0.01
     }
     diesel_data = {
         "name": "Test Diesel",
+        "vehicle_type": "rigid",
         "purchase_price": 50000,
         "lifespan": 15, # Example value
-        "residual_value_pct": 0.35, 
-        "maintenance_cost_per_km": 0.05, 
-        "insurance_cost_percent": 0.025, 
-        "registration_cost": 600, 
-        "fuel_consumption_l_per_100km": 10.0,  
+        "residual_value_projections": {5: 0.5, 10: 0.3, 15: 0.15}, # Example
+        "registration_cost": 600,
+        "fuel_consumption_l_per_100km": 10.0,
         "co2_emission_factor": 2.68 # kg CO2e/L
     }
     
-    return Scenario(
-        analysis_years=5,
-        discount_rate_real=0.03,
-        electricity_price=0.20,  # $/kWh
-        diesel_price=1.50,  # $/L
-        road_user_charge=0.05, # $/km
-        carbon_tax_rate=30, # $/tonne CO2e
-        annual_mileage=15000,
-        electric_vehicle=ElectricVehicle(**ev_data), # Instantiate vehicle
-        diesel_vehicle=DieselVehicle(**diesel_data), # Instantiate vehicle
-        charger_cost=5000,
-        charger_installation_cost=1000, # Added example value
-        charger_maintenance_percent=0.01,
-        charger_lifespan=10, # Added example value
-        electric_maintenance_cost_per_km=0.03, # Added
-        diesel_maintenance_cost_per_km=0.05, # Added
-        insurance_base_rate=0.025, # Added example value
-        electric_insurance_cost_factor=1.0, # Added example value
-        diesel_insurance_cost_factor=1.0, # Added example value
-        annual_registration_cost=550, # Added example value
-        battery_degradation_rate=0.02, # Annual capacity loss
-        insurance_increase_rate=0.01,
-        registration_increase_rate=0.01,
-        maintenance_increase_rate=0.01,
-        electricity_price_increase=0.02,
-        diesel_price_increase=0.03,
-        carbon_tax_increase_rate=0.05,
-        road_user_charge_increase_rate=0.01,
-        include_carbon_tax=True,
-        include_road_user_charge=True,
-        force_battery_replacement_year=None
-    )
+    # Use BASE_SCENARIO_CONFIG structure adapted for model tests
+    scenario_dict = {
+        "name": "Model Test Scenario",
+        "description": "Scenario for testing TCOCalculator",
+        "analysis_years": 5,
+        "start_year": 2025,
+        "discount_rate_real": 0.03,
+        "inflation_rate": 0.02,
+        "annual_mileage": 15000,
+        "electric_vehicle": ElectricVehicle(**ev_data),
+        "diesel_vehicle": DieselVehicle(**diesel_data),
+        "financing_method": "loan", # Test loan scenario
+        "down_payment_pct": 0.1,
+        "loan_term": 4,
+        "interest_rate": 0.08,
+        "infrastructure_costs": { # Simplified example
+            "selected_charger_cost": 5000,
+            "selected_installation_cost": 1000,
+            "charger_maintenance_percent": 0.01,
+            "charger_lifespan": 10
+        },
+        "electricity_price_projections": {
+            "test_elec": {2025: 0.20, 2030: 0.25}
+        },
+        "diesel_price_scenarios": {
+            "test_diesel": {2025: 1.50, 2030: 1.80}
+        },
+        "selected_electricity_scenario": "test_elec",
+        "selected_diesel_scenario": "test_diesel",
+        "maintenance_costs_detailed": {
+            "rigid_bet": {"annual_min": 500, "annual_max": 1000}, # Example
+            "rigid_diesel": {"annual_min": 1500, "annual_max": 3000} # Example
+        },
+        "insurance_and_registration": { # Example
+            "insurance": {"electric_prime_mover": 10000, "diesel_prime_mover": 7000},
+            "registration": {"electric": 500, "diesel": 600}
+        },
+        "carbon_tax_rate": 30, # $/tonne CO2e
+        "road_user_charge": 0.05, # $/km
+        "carbon_tax_increase_rate": 0.05,
+        "road_user_charge_increase_rate": 0.01,
+        "maintenance_increase_rate": 0.01,
+        "insurance_increase_rate": 0.01,
+        "registration_increase_rate": 0.01,
+        "include_carbon_tax": True,
+        "include_road_user_charge": True,
+        "enable_battery_replacement": True,
+        "battery_degradation_rate": 0.02, # Annual capacity loss
+        "battery_replacement_threshold": 0.7,
+        "force_battery_replacement_year": None
+    }
+    
+    try:
+        return Scenario(**scenario_dict)
+    except ValidationError as e:
+        print(f"Validation Error creating basic_scenario fixture: {e}")
+        pytest.fail(f"Fixture basic_scenario failed validation: {e}")
 
 @pytest.fixture
 def calculator():
@@ -163,27 +187,36 @@ def test_calculate_spot_check_values(calculator, basic_scenario):
     assert diesel_costs.loc[0, 'EnergyCost'] == pytest.approx(expected_diesel_energy_y1)
 
     # Example Spot Check: EV Acquisition Cost Year 1 (undiscounted)
-    # Default financing is 'loan', so cost in year 0 is down payment.
-    # Purchase price = 60000, down_payment_pct = 0.2 (default in Scenario)
-    expected_ev_acq_y1 = 60000.0 * 0.2
+    # Financing method is 'loan' in this fixture (down_payment_pct=0.1)
+    # Cost in Year 0 (index 0) should be the down payment.
+    expected_ev_acq_y1 = basic_scenario.electric_vehicle.purchase_price * basic_scenario.down_payment_pct # 60000 * 0.1 = 6000
     assert ev_costs.loc[0, 'AcquisitionCost'] == pytest.approx(expected_ev_acq_y1)
 
     # Example Spot Check: EV Infrastructure Cost Year 1 (undiscounted)
-    # Charger cost = 5000, Install = 1000, Lifespan = 10
-    # Amortized = (5000+1000)/10 = 600
-    # Maintenance % = 0.01 -> 5000 * 0.01 = 50
-    # Maintenance increase rate = 0.01
-    # Cost Year 1 (index 0) = Amortized + Maintenance * (1+increase_rate)^0 = 600 + 50 * (1.01)^0 = 650
-    expected_ev_infra_y1 = 650.0 # Updated expectation: Amortized Capital + Maintenance Y1
+    # Charger cost = 5000, Install = 1000, Total = 6000
+    # Lifespan = 10 -> Amortized Capital = 6000 / 10 = 600
+    # Maintenance % = 0.01 -> Base Maintenance = 6000 * 0.01 = 60
+    # Maintenance increase rate = 0.01 (from scenario)
+    # Maintenance Cost Year 1 (index 0) = Base Maintenance * (1+increase_rate)^0 = 60 * (1.01)^0 = 60.0
+    # Total Cost Year 1 = Amortized Capital + Maintenance Cost = 600 + 60 = 660.0
+    infra = basic_scenario.infrastructure_costs
+    capital_cost = infra['selected_charger_cost'] + infra['selected_installation_cost']
+    lifespan = infra['charger_lifespan']
+    amortized_capital = capital_cost / lifespan if lifespan > 0 else 0
+    base_maint = capital_cost * infra['charger_maintenance_percent']
+    maintenance_cost_y1 = base_maint * (1 + basic_scenario.maintenance_increase_rate) ** 0 # year_index = 0
+    expected_ev_infra_y1 = amortized_capital + maintenance_cost_y1
     assert ev_costs.loc[0, 'InfrastructureCost'] == pytest.approx(expected_ev_infra_y1)
 
     # Example Spot Check: Diesel Maintenance Cost Year 2 (undiscounted)
-    # Maintenance cost/km = 0.05
+    # Uses maintenance_costs_detailed from the scenario fixture.
+    # Vehicle type: rigid_diesel
+    # Annual min = 1500, Annual max = 3000 -> Average = 2250
     # Maintenance increase rate = 0.01
-    # Cost/km Year 2 (index 1) = 0.05 * (1 + 0.01)^1 = 0.0505
-    # Annual km = 15000
-    # Maintenance Cost Year 2 = 15000 * 0.0505 = 757.5
-    expected_diesel_maint_y2 = 757.5
+    # Cost Year 2 (index 1) = Average * (1 + increase_rate)^1 = 2250 * (1.01)^1 = 2272.5
+    maint_details = basic_scenario.maintenance_costs_detailed['rigid_diesel']
+    base_avg_maint = (maint_details['annual_min'] + maint_details['annual_max']) / 2.0
+    expected_diesel_maint_y2 = base_avg_maint * (1 + basic_scenario.maintenance_increase_rate) ** 1 # year_index = 1
     assert diesel_costs.loc[1, 'MaintenanceCost'] == pytest.approx(expected_diesel_maint_y2)
 
     # Example Spot Check: Diesel Residual Value Year 5 (undiscounted)

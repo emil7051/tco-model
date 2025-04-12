@@ -1,0 +1,158 @@
+name: Default Scenario 2025 Projections
+description: Default TCO scenario using projections starting from 2025 based on updated_data.
+analysis_years: 15
+start_year: 2025
+discount_rate_real: 0.07
+inflation_rate: 0.025
+annual_mileage: 40000  # Representative urban delivery mileage
+
+financing_method: loan
+down_payment_pct: 0.20
+loan_term: 5
+interest_rate: 0.07
+
+# --- Vehicle Definitions ---
+electric_vehicle:
+  name: Electric Rigid Truck (Default)
+  vehicle_type: rigid
+  purchase_price: 400000
+  lifespan: 15
+  residual_value_projections: # Based on rigid_bet midpoints
+    5: 0.45  # Avg of [0.40, 0.50]
+    10: 0.25 # Avg of [0.20, 0.30]
+    15: 0.125 # Avg of [0.10, 0.15]
+  registration_cost: 5000 # From insurance_and_registration data
+  purchase_price_annual_decrease_real: 0.02
+  # Battery Details
+  battery_capacity_kwh: 300 # Representative capacity
+  energy_consumption_kwh_per_km: 0.70 # Based on rigid urban avg (70 kWh/100km)
+  battery_warranty_years: 8 # Common default
+  battery_pack_cost_projections_aud_per_kwh: # From updated_data
+    2025: 170
+    2030: 100
+    2035: 75
+    2040: 60
+  battery_cycle_life: 1500 # Default assumption
+  battery_depth_of_discharge: 0.8 # Default assumption
+  charging_efficiency: 0.9 # Default assumption
+
+diesel_vehicle:
+  name: Diesel Rigid Truck (Default)
+  vehicle_type: rigid
+  purchase_price: 200000
+  lifespan: 15
+  residual_value_projections: # Based on rigid_diesel midpoints
+    5: 0.55  # Avg of [0.50, 0.60]
+    10: 0.35 # Avg of [0.30, 0.40]
+    15: 0.20  # Avg of [0.15, 0.25]
+  registration_cost: 5000 # From insurance_and_registration data
+  # Fuel Details
+  fuel_consumption_l_per_100km: 28.6 # Based on rigid urban avg
+  co2_emission_factor: 2.68 # Standard kg CO2e per litre diesel
+
+# --- Infrastructure Costs --- (From updated_data)
+infrastructure_costs:
+  charger_hardware:
+    dc_fast_150kw: 50000
+    high_power_350kw_plus: 150000
+  total_per_truck: # Provide a single value for the model, user can adjust
+    min: 100000 # Placeholder, needs refinement on how to handle range/selection in model/UI
+    max: 150000 # Placeholder
+  # Simplified for model input - using average assumptions
+  selected_charger_cost: 50000 # Example: Using 150kW charger cost
+  selected_installation_cost: 55000 # Example: Midpoint of installation range
+  charger_maintenance_percent: 0.015 # From maintenance data
+  charger_lifespan: 10 # Default assumption, not in updated_data
+
+# --- Price Projections & Selections --- (From updated_data)
+electricity_price_projections:
+  average_flat_rate:
+    2025: [0.30, 0.40]
+    2030: [0.28, 0.38]
+    2035: [0.26, 0.36]
+    2040: [0.25, 0.35]
+  off_peak_tou:
+    2025: [0.15, 0.25]
+    2030: [0.13, 0.22]
+    2035: [0.11, 0.20]
+    2040: [0.10, 0.18]
+  ev_plan_low:
+    2025: 0.08
+    2030: 0.07
+    2035: 0.06
+    2040: 0.05
+  ev_plan_high:
+    2025: 0.15
+    2030: 0.13
+    2035: 0.11
+    2040: 0.10
+
+diesel_price_scenarios:
+  baseline_2025: 1.85
+  low_stable:
+    2025: 1.85
+    2030: 1.85
+    2035: 1.85
+    2040: 1.85
+  medium_increase:
+    2025: 1.85
+    2030: 2.10
+    2035: 2.35
+    2040: 2.60
+  high_increase:
+    2025: 1.85
+    2030: 2.40
+    2035: 2.90
+    2040: 3.40
+
+selected_electricity_scenario: average_flat_rate # Default selection
+selected_diesel_scenario: medium_increase # Default selection
+
+# --- Detailed Maintenance Costs --- (From updated_data)
+maintenance_costs_detailed:
+  rigid_bet:
+    annual_min: 500
+    annual_max: 1000
+    notes: "Mainly checks, fluids, filters"
+  articulated_bet:
+    annual_min: 700
+    annual_max: 1500
+    notes: "Higher complexity/scale"
+  rigid_diesel:
+    annual_min: 1500
+    annual_max: 3000
+    notes: "Includes oil/filter changes, emissions system"
+  articulated_diesel:
+    annual_min: 2500
+    annual_max: 5000
+    notes: "More frequent/complex servicing"
+
+# --- Insurance and Registration --- (From updated_data)
+insurance_and_registration:
+  insurance:
+    electric_prime_mover: 20000 # Note: Data specific to prime mover, using as proxy for rigid
+    diesel_prime_mover: 10000 # Note: Data specific to prime mover, using as proxy for rigid
+    notes: "Based on vehicle value"
+  registration:
+    electric: 5000
+    diesel: 5000
+    notes: "Similar for both types"
+
+# --- Other Costs & Rates ---
+carbon_tax_rate: 30.00 # From default_parameters
+carbon_tax_increase_rate: 0.05 # From default_parameters
+road_user_charge: 0.0 # Default
+road_user_charge_increase_rate: 0.0 # Default
+
+# --- General Cost Increase Rates (Apply to costs not covered by projections) ---
+maintenance_increase_rate: 0.025 # Assume matches inflation
+insurance_increase_rate: 0.025 # Assume matches inflation
+registration_increase_rate: 0.025 # Assume matches inflation
+
+# --- Flags / Options ---
+include_carbon_tax: True
+include_road_user_charge: False # Default as base rate is 0
+enable_battery_replacement: True
+battery_degradation_rate: 0.02 # From default_parameters
+battery_replacement_threshold: 0.70 # From default_parameters
+force_battery_replacement_year: null # Default 

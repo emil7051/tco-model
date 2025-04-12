@@ -150,7 +150,6 @@ def display_results(results: dict):
         mime="text/csv",
         key="download-summary"
     )
-    st.markdown("--- hurtful text deleted by model ---") # Separator
 
     # --- 2. TCO Comparison Chart --- 
     st.subheader("📊 Total TCO Comparison")
