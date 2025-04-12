@@ -7,8 +7,14 @@ This module includes functions for:
 - Depreciation calculations
 - Other financial utility functions
 """
-from typing import Dict, List, Tuple, Optional
+# Standard library imports
+from typing import Dict, List, Optional, Tuple
+
+# Third-party imports
 import numpy as np
+
+# Application-specific imports
+from config.constants import DEFAULT_PAYMENT_FREQUENCY, PAYMENTS_PER_YEAR
 from utils.conversions import percentage_to_decimal
 
 
@@ -16,7 +22,7 @@ def calculate_loan_payment(
     principal: float,
     interest_rate: float,
     loan_term_years: int,
-    payment_frequency: str = 'monthly'
+    payment_frequency: str = DEFAULT_PAYMENT_FREQUENCY
 ) -> float:
     """
     Calculate regular loan payment using the PMT formula.
@@ -34,11 +40,7 @@ def calculate_loan_payment(
     r = percentage_to_decimal(interest_rate)
     
     # Determine number of payments based on frequency
-    payments_per_year = {
-        'monthly': 12,
-        'quarterly': 4,
-        'annually': 1
-    }.get(payment_frequency.lower(), 12)  # Default to monthly
+    payments_per_year = PAYMENTS_PER_YEAR.get(payment_frequency.lower(), 12)  # Default to monthly
     
     # Convert annual rate to rate per payment period
     rate_per_period = r / payments_per_year
@@ -61,7 +63,7 @@ def calculate_loan_schedule(
     principal: float,
     interest_rate: float,
     loan_term_years: int,
-    payment_frequency: str = 'monthly'
+    payment_frequency: str = DEFAULT_PAYMENT_FREQUENCY
 ) -> List[Dict]:
     """
     Generate a complete loan amortization schedule.
@@ -82,11 +84,7 @@ def calculate_loan_schedule(
     r = percentage_to_decimal(interest_rate)
     
     # Determine number of payments based on frequency
-    payments_per_year = {
-        'monthly': 12,
-        'quarterly': 4,
-        'annually': 1
-    }.get(payment_frequency.lower(), 12)  # Default to monthly
+    payments_per_year = PAYMENTS_PER_YEAR.get(payment_frequency.lower(), 12)  # Default to monthly
     
     # Convert annual rate to rate per payment period
     rate_per_period = r / payments_per_year

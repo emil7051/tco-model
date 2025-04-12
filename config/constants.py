@@ -8,6 +8,7 @@ This file contains all common constants to avoid magic numbers and strings in th
 DEFAULT_DESCRIPTION = ""
 DEFAULT_SCENARIO_NAME = "New Scenario"
 CURRENT_YEAR = 2023  # Default year for calculations - could be replaced with dynamic datetime.now().year
+DEFAULT_CURRENCY = "AUD"  # Default currency for calculations and display
 
 # ===== Economic Constants =====
 DEFAULT_DISCOUNT_RATE = 7.0  # %
@@ -16,6 +17,14 @@ DEFAULT_INTEREST_RATE = 7.0  # %
 DEFAULT_DOWN_PAYMENT_PCT = 20.0  # %
 DEFAULT_CARBON_TAX_RATE = 30.0  # AUD/tonne CO2e
 DEFAULT_ROAD_USER_CHARGE = 0.0  # AUD/km
+
+# ===== Loan and Payment Constants =====
+DEFAULT_PAYMENT_FREQUENCY = "monthly"
+PAYMENTS_PER_YEAR = {
+    "monthly": 12,
+    "quarterly": 4,
+    "annually": 1
+}
 
 # ===== Analysis Constants =====
 DEFAULT_ANALYSIS_YEARS = 15
@@ -59,6 +68,14 @@ DEFAULTS_DIR = f"{DEFAULT_CONFIG_DIR}/defaults"
 
 # ===== Calculation Constants =====
 DIESEL_CO2_EMISSION_FACTOR = 2.68  # kg CO2e/L of diesel
+DIESEL_ENERGY_CONTENT = 10.0  # kWh/L of diesel
+KWH_TO_MJ_FACTOR = 3.6  # 1 kWh = 3.6 MJ
+
+# ===== Conversion Constants =====
+MJ_TO_KWH_FACTOR = 1 / KWH_TO_MJ_FACTOR  # 1 MJ = 1/3.6 kWh
+L_TO_KM_FACTOR = 100  # 1 L/100km = 1 km/L
+KM_TO_MILES_FACTOR = 0.621371  # 1 km = 0.621371 miles
+MILES_TO_KM_FACTOR = 1 / KM_TO_MILES_FACTOR  # 1 mile = 1/0.621371 km
 
 # ===== UI Constants =====
 # Page Configuration

@@ -6,9 +6,14 @@ This module includes functions for:
 - Value format conversions (e.g., percentage to decimal)
 - Date and time format conversions
 """
-from typing import Dict, List, Union, Optional
+# Standard library imports
 import datetime
+from typing import Dict, List, Optional, Union
 
+# Application-specific imports
+from config.constants import (
+    DEFAULT_CURRENCY, DIESEL_ENERGY_CONTENT, KWH_TO_MJ_FACTOR
+)
 
 def percentage_to_decimal(percentage: float) -> float:
     """
@@ -36,13 +41,13 @@ def decimal_to_percentage(decimal: float) -> float:
     return decimal * 100.0
 
 
-def l_per_100km_to_kwh_per_km(fuel_consumption: float, energy_conversion_factor: float = 10.0) -> float:
+def l_per_100km_to_kwh_per_km(fuel_consumption: float, energy_conversion_factor: float = DIESEL_ENERGY_CONTENT) -> float:
     """
     Convert diesel fuel consumption in L/100km to energy consumption in kWh/km.
     
     Args:
         fuel_consumption: Fuel consumption in L/100km
-        energy_conversion_factor: Energy content of diesel (kWh/L), default 10.0
+        energy_conversion_factor: Energy content of diesel (kWh/L), default from constants
         
     Returns:
         Energy consumption in kWh/km
@@ -51,13 +56,13 @@ def l_per_100km_to_kwh_per_km(fuel_consumption: float, energy_conversion_factor:
     return (fuel_consumption / 100.0) * energy_conversion_factor
 
 
-def kwh_per_km_to_l_per_100km(energy_consumption: float, energy_conversion_factor: float = 10.0) -> float:
+def kwh_per_km_to_l_per_100km(energy_consumption: float, energy_conversion_factor: float = DIESEL_ENERGY_CONTENT) -> float:
     """
     Convert energy consumption in kWh/km to diesel equivalent in L/100km.
     
     Args:
         energy_consumption: Energy consumption in kWh/km
-        energy_conversion_factor: Energy content of diesel (kWh/L), default 10.0
+        energy_conversion_factor: Energy content of diesel (kWh/L), default from constants
         
     Returns:
         Fuel consumption in L/100km
@@ -76,7 +81,7 @@ def kwh_to_mj(kwh: float) -> float:
     Returns:
         Energy in megajoules
     """
-    return kwh * 3.6  # 1 kWh = 3.6 MJ
+    return kwh * KWH_TO_MJ_FACTOR  # 1 kWh = 3.6 MJ
 
 
 def mj_to_kwh(mj: float) -> float:
@@ -89,7 +94,7 @@ def mj_to_kwh(mj: float) -> float:
     Returns:
         Energy in kilowatt-hours
     """
-    return mj / 3.6  # 1 kWh = 3.6 MJ
+    return mj / KWH_TO_MJ_FACTOR  # 1 kWh = 3.6 MJ
 
 
 def flatten_nested_dict(nested_dict: Dict, parent_key: str = '', separator: str = '_') -> Dict:
@@ -145,13 +150,13 @@ def unflatten_dict(flat_dict: Dict, separator: str = '_') -> Dict:
     return result
 
 
-def format_currency(value: float, currency: str = 'AUD', decimals: int = 0) -> str:
+def format_currency(value: float, currency: str = DEFAULT_CURRENCY, decimals: int = 0) -> str:
     """
     Format a value as currency.
     
     Args:
         value: The value to format
-        currency: The currency code (default: 'AUD')
+        currency: The currency code (default from constants)
         decimals: The number of decimal places (default: 0)
         
     Returns:

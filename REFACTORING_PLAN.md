@@ -18,14 +18,12 @@ This document outlines the step-by-step plan for improving the Australian Heavy 
 - ✅ Added common constants to `config/constants.py`
 - ✅ Implemented `config/scenarios/long_haul.yaml`
 
+### 1.3 ✅ Standardize Project Structure
+- ✅ Create a consistent file naming and organization convention
+- ✅ Move magic numbers and strings to constants
+- ✅ Document the project structure in README.md
+
 ## 📋 Pending Tasks
-
-### 1. Code Structure and Organization
-
-#### 1.3 Standardize Project Structure
-- [ ] Create a consistent file naming and organization convention
-- [ ] Move magic numbers and strings to constants
-- [ ] Document the project structure in README.md
 
 ### 2. Data Management
 
@@ -101,7 +99,7 @@ The recommended order for implementing these changes is:
 
 ### Phase 1: Foundation Improvements ✅
 1. ✅ Clean up empty files (Task 1.2)
-2. Standardize project structure (Task 1.3) ← **Next Priority**
+2. ✅ Standardize project structure (Task 1.3)
 3. Add constants and basic validation (Tasks 1.2, 1.3) ✅
 4. Improve documentation (Task 5.2 - initial phase)
 
