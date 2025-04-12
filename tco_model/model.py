@@ -17,103 +17,15 @@ from .components import (
 )
 from .scenarios import Scenario
 from .vehicles import DieselVehicle, ElectricVehicle, Vehicle
+from .optimizations import (
+    timed, optimize_dataframe, performance_monitor, 
+    batch_process, vectorized_calculation, cached
+)
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 
-# Performance monitoring utilities
-class PerformanceStats:
-    """Simple class to track performance metrics for TCO calculations."""
-    
-    def __init__(self):
-        self.timings = {}
-        self.call_counts = {}
-        
-    def record(self, operation: str, elapsed: float) -> None:
-        """Record the time taken for an operation."""
-        if operation not in self.timings:
-            self.timings[operation] = 0.0
-            self.call_counts[operation] = 0
-        
-        self.timings[operation] += elapsed
-        self.call_counts[operation] += 1
-        
-    def get_report(self) -> Dict[str, Any]:
-        """Generate a performance report."""
-        report = {
-            'timings': {k: round(v, 4) for k, v in self.timings.items()},
-            'call_counts': self.call_counts.copy(),
-            'avg_times': {
-                k: round(v / self.call_counts.get(k, 1), 4) 
-                for k, v in self.timings.items()
-            }
-        }
-        
-        # Calculate total time and percentage breakdown
-        total_time = sum(self.timings.values())
-        if total_time > 0:
-            report['total_time'] = round(total_time, 4)
-            report['percentages'] = {
-                k: round((v / total_time) * 100, 2) 
-                for k, v in self.timings.items()
-            }
-        
-        return report
-    
-    def reset(self) -> None:
-        """Reset all performance metrics."""
-        self.timings = {}
-        self.call_counts = {}
-
-
-# Function decorator for timing operations
-def timed(operation_name: str = None):
-    """Decorator to time function execution and record metrics."""
-    def decorator(func):
-        nonlocal operation_name
-        if operation_name is None:
-            operation_name = func.__qualname__
-            
-        def wrapper(*args, **kwargs):
-            instance = args[0] if args else None
-            
-            # Only time if the instance has performance stats
-            if instance and hasattr(instance, '_performance_stats'):
-                start_time = time.time()
-                result = func(*args, **kwargs)
-                elapsed = time.time() - start_time
-                
-                instance._performance_stats.record(operation_name, elapsed)
-                return result
-            else:
-                # Just call the function if no stats tracking
-                return func(*args, **kwargs)
-                
-        return wrapper
-    return decorator
-
-
-def optimize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Optimize a DataFrame for memory usage and performance.
-    
-    Applies memory-saving techniques like downcast and category conversion.
-    """
-    result = df.copy()
-    
-    # Optimize numeric columns
-    for col in result.select_dtypes(include=['int']).columns:
-        result[col] = pd.to_numeric(result[col], downcast='integer')
-        
-    for col in result.select_dtypes(include=['float']).columns:
-        result[col] = pd.to_numeric(result[col], downcast='float')
-    
-    # Convert object columns with few unique values to category
-    for col in result.select_dtypes(include=['object']).columns:
-        if result[col].nunique() / len(result) < 0.5:  # If less than 50% unique values
-            result[col] = result[col].astype('category')
-    
-    return result
+# Importing performance monitoring utilities from optimizations module instead
 
 
 class TCOCalculator:
@@ -154,8 +66,8 @@ class TCOCalculator:
         # Calculation results cache
         self._calculation_cache: Dict[str, Dict[str, Any]] = {}
         
-        # Performance tracking
-        self._performance_stats = PerformanceStats()
+        # Performance tracking - use the global instance from optimizations module
+        self._performance_stats = performance_monitor
 
     def _get_applicable_components(self, vehicle: Vehicle, scenario: Scenario) -> List[CostComponent]:
         """
@@ -228,42 +140,74 @@ class TCOCalculator:
         """
         applicable_components = self._get_applicable_components(vehicle, scenario)
         component_names = [comp.__class__.__name__ for comp in applicable_components]
-        years = list(range(scenario.analysis_years))
         
-        # Initialize the data structure for annual costs
-        annual_costs_data = {name: [0.0] * scenario.analysis_years for name in component_names}
-        annual_costs_data['Year'] = [datetime.now().year + year_index for year_index in years]
+        # Use numpy arrays for better performance with vectorized operations
+        years = np.array(range(scenario.analysis_years))
+        calendar_years = np.array([datetime.now().year + year_index for year_index in years])
         
-        total_mileage_km = 0.0
-
-        # Calculate costs for each year and component
-        for year_index in years:
-            current_calendar_year = datetime.now().year + year_index
+        # Pre-calculate cumulative mileage for all years
+        mileage_array = np.cumsum(np.full(len(years), scenario.annual_mileage))
+        
+        # Initialize the data structure for annual costs using numpy arrays for better performance
+        annual_costs_data = {name: np.zeros(scenario.analysis_years) for name in component_names}
+        annual_costs_data['Year'] = calendar_years
+        
+        # Process components in batches for better performance
+        BATCH_SIZE = 5  # Process years in batches of 5 for better performance
+        
+        for comp_instance in applicable_components:
+            comp_name = comp_instance.__class__.__name__
+            costs = np.zeros(len(years))
             
-            # Calculate costs for each applicable component
-            for comp_instance in applicable_components:
-                comp_name = comp_instance.__class__.__name__
+            # Check if component supports vectorized calculation
+            if hasattr(comp_instance, 'calculate_vectorized') and callable(getattr(comp_instance, 'calculate_vectorized')):
                 try:
-                    cost = comp_instance.calculate_annual_cost(
-                        year=current_calendar_year,
+                    # Use vectorized calculation if available
+                    vectorized_costs = comp_instance.calculate_vectorized(
+                        years=calendar_years,
                         vehicle=vehicle,
                         scenario=scenario,
-                        calculation_year_index=year_index,
-                        total_mileage_km=total_mileage_km
+                        year_indices=years,
+                        total_mileage_km=mileage_array
                     )
-                    # Ensure cost is numeric, default to 0 if calculation returns None or NaN
-                    annual_costs_data[comp_name][year_index] = cost if pd.notna(cost) else 0.0
+                    costs = np.array(vectorized_costs)
                 except Exception as e:
-                    logger.error(f"Error calculating {comp_name} for {vehicle.name} in year index {year_index}: {e}", exc_info=True)
-                    annual_costs_data[comp_name][year_index] = np.nan  # Mark as NaN on error
+                    logger.error(f"Error in vectorized calculation for {comp_name}: {e}", exc_info=True)
+                    # Fall back to non-vectorized calculation if vectorized fails
             
-            # Update total mileage for next year's calculations
-            total_mileage_km += scenario.annual_mileage
+            # Process in batches if not using vectorized calculation or if vectorized failed
+            if not hasattr(comp_instance, 'calculate_vectorized') or np.all(costs == 0):
+                # Process in batches for better performance
+                for batch_start in range(0, len(years), BATCH_SIZE):
+                    batch_end = min(batch_start + BATCH_SIZE, len(years))
+                    batch_years = years[batch_start:batch_end]
+                    
+                    # Calculate costs for this batch
+                    for i, year_index in enumerate(batch_years):
+                        current_calendar_year = calendar_years[batch_start + i]
+                        try:
+                            cost = comp_instance.calculate_annual_cost(
+                                year=current_calendar_year,
+                                vehicle=vehicle,
+                                scenario=scenario,
+                                calculation_year_index=year_index,
+                                total_mileage_km=mileage_array[batch_start + i]
+                            )
+                            costs[batch_start + i] = cost if pd.notna(cost) else 0.0
+                        except Exception as e:
+                            logger.error(f"Error calculating {comp_name} for {vehicle.name} "
+                                        f"in year index {year_index}: {e}", exc_info=True)
+                            costs[batch_start + i] = np.nan
+            
+            annual_costs_data[comp_name] = costs
         
         # Convert to DataFrame and add a Total column
         df = pd.DataFrame(annual_costs_data)
         component_cost_columns = [col for col in df.columns if col != 'Year']
-        df['Total'] = df[component_cost_columns].sum(axis=1)
+        df['Total'] = df[component_cost_columns].sum(axis=1, skipna=True)
+        
+        # Fill any NaN values with 0 for consistency
+        df = df.fillna(0.0)
         
         # Optimize the dataframe for memory usage
         return optimize_dataframe(df)
@@ -287,17 +231,18 @@ class TCOCalculator:
         # Make a copy to avoid modifying the original
         discounted_df = undiscounted_df.copy()
         
-        # Calculate discount factors for each year
-        years = list(range(len(discounted_df)))
-        discount_factors = [(1 / ((1 + discount_rate) ** year)) for year in years]
+        # Use vectorized numpy operations for better performance
+        years = np.arange(len(discounted_df))
+        # Calculate discount factors as a numpy array for vectorized multiplication
+        discount_factors = 1 / np.power(1 + discount_rate, years)
         
-        # Apply discount factors to all cost columns (exclude 'Year' column)
-        for col in discounted_df.columns:
-            if col != 'Year':
-                discounted_df[col] = discounted_df[col] * discount_factors
+        # Apply discount factors to all cost columns (exclude 'Year' column) at once
+        cost_columns = [col for col in discounted_df.columns if col != 'Year']
+        discounted_df[cost_columns] = discounted_df[cost_columns].multiply(discount_factors, axis=0)
         
         return optimize_dataframe(discounted_df)
 
+    @cached("tco_calculation:{scenario.name}")
     def calculate(self, scenario: Scenario) -> Dict[str, Any]:
         """
         Perform the full TCO calculation for the given scenario.
@@ -311,90 +256,26 @@ class TCOCalculator:
             A dictionary containing detailed results including undiscounted and discounted
             annual costs, total TCO, LCOD, parity year, and analysis years.
         """
-        # Check if we have a cached result for this scenario
-        cache_key = f"{scenario.name}_{id(scenario)}"
-        if cache_key in self._calculation_cache:
-            logger.info(f"Using cached results for scenario: {scenario.name}")
-            return self._calculation_cache[cache_key]
-            
         # Start timing the calculation
         start_time = time.time()
         logger.info(f"Starting TCO calculation for scenario: {scenario.name}")
         
-        results = {
-            'scenario_name': scenario.name,
-            'analysis_years': scenario.analysis_years,
-            'annual_mileage': scenario.annual_mileage,
-            'discount_rate': scenario.discount_rate_real,
-            'error': None
-        }
+        # Initialize results with scenario metadata
+        results = self._initialize_results(scenario)
         
         try:
-            # Get vehicle instances from the scenario
-            electric_vehicle = scenario.electric_vehicle
-            diesel_vehicle = scenario.diesel_vehicle
-            
-            if not electric_vehicle or not diesel_vehicle:
-                error_msg = "Scenario missing electric or diesel vehicle"
-                logger.error(error_msg)
-                results['error'] = error_msg
+            # Validate vehicle data
+            if not self._validate_vehicles(scenario, results):
                 return results
             
-            # 1. Calculate undiscounted annual costs for both vehicle types
-            logger.info(f"Calculating costs for {electric_vehicle.name} (Electric)")
-            electric_undisc = self._calculate_annual_costs_undiscounted(electric_vehicle, scenario)
+            # Calculate costs for both vehicle types
+            results = self._calculate_vehicle_costs(scenario, results)
             
-            logger.info(f"Calculating costs for {diesel_vehicle.name} (Diesel)")
-            diesel_undisc = self._calculate_annual_costs_undiscounted(diesel_vehicle, scenario)
-            
-            results['electric_annual_costs_undiscounted'] = electric_undisc
-            results['diesel_annual_costs_undiscounted'] = diesel_undisc
-            
-            # 2. Apply discounting
-            logger.info("Applying discounting...")
-            electric_disc = self._apply_discounting(electric_undisc, scenario.discount_rate_real)
-            diesel_disc = self._apply_discounting(diesel_undisc, scenario.discount_rate_real)
-            
-            results['electric_annual_costs_discounted'] = electric_disc
-            results['diesel_annual_costs_discounted'] = diesel_disc
-            
-            # 3. Calculate total TCO (sum of *discounted* total costs)
-            total_tco_ev = electric_disc['Total'].sum() if not electric_disc.empty else 0
-            total_tco_diesel = diesel_disc['Total'].sum() if not diesel_disc.empty else 0
-            
-            results['electric_total_tco'] = total_tco_ev
-            results['diesel_total_tco'] = total_tco_diesel
-            logger.info(f"Total Discounted TCO - EV: {total_tco_ev:,.2f}, Diesel: {total_tco_diesel:,.2f}")
-            
-            # 4. Calculate Levelized Cost of Driving (LCOD) using discounted TCO
-            lcod_ev = self._calculate_lcod(total_tco_ev, scenario)
-            lcod_diesel = self._calculate_lcod(total_tco_diesel, scenario)
-            
-            results['electric_lcod'] = lcod_ev
-            results['diesel_lcod'] = lcod_diesel
-            logger.info(f"LCOD - EV: {lcod_ev:.3f} AUD/km, Diesel: {lcod_diesel:.3f} AUD/km")
-            
-            # 5. Find parity year using *undiscounted* cumulative costs
-            parity_year = self._find_parity_year_undiscounted(
-                electric_undisc['Total'].cumsum(),
-                diesel_undisc['Total'].cumsum(),
-                electric_undisc['Year']  # Pass Year series for mapping index to year
-            )
-            
-            results['parity_year'] = parity_year
-            logger.info(f"Undiscounted TCO Parity Year: {parity_year if parity_year else 'None'}")
-            
-            # 6. Add summary metrics
-            results['tco_difference'] = total_tco_diesel - total_tco_ev
-            results['tco_ev_to_diesel_ratio'] = total_tco_ev / total_tco_diesel if total_tco_diesel != 0 else float('inf')
+            # Calculate metrics
+            results = self._calculate_comparison_metrics(results)
             
             # Record total calculation time
-            elapsed = time.time() - start_time
-            self._performance_stats.record("total_calculation", elapsed)
-            results['calculation_time_seconds'] = round(elapsed, 4)
-            
-            # Cache the results
-            self._calculation_cache[cache_key] = results
+            self._record_calculation_time(start_time, results)
             
             return results
             
@@ -402,6 +283,108 @@ class TCOCalculator:
             logger.error(f"Error during TCO calculation: {e}", exc_info=True)
             results['error'] = f"Calculation failed: {e}"
             return results  # Return partial results with error message
+    
+    def _initialize_results(self, scenario: Scenario) -> Dict[str, Any]:
+        """Initialize the results dictionary with scenario metadata."""
+        return {
+            'scenario_name': scenario.name,
+            'analysis_years': scenario.analysis_years,
+            'annual_mileage': scenario.annual_mileage,
+            'discount_rate': scenario.discount_rate_real,
+            'error': None
+        }
+    
+    def _validate_vehicles(self, scenario: Scenario, results: Dict[str, Any]) -> bool:
+        """Validate that both vehicle types are present in the scenario."""
+        electric_vehicle = scenario.electric_vehicle
+        diesel_vehicle = scenario.diesel_vehicle
+        
+        if not electric_vehicle or not diesel_vehicle:
+            error_msg = "Scenario missing electric or diesel vehicle"
+            logger.error(error_msg)
+            results['error'] = error_msg
+            return False
+        
+        return True
+    
+    def _calculate_vehicle_costs(self, scenario: Scenario, results: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate costs for both vehicle types and add to results."""
+        # Get vehicle instances
+        electric_vehicle = scenario.electric_vehicle
+        diesel_vehicle = scenario.diesel_vehicle
+        
+        # 1. Calculate undiscounted annual costs for both vehicle types
+        logger.info(f"Calculating costs for {electric_vehicle.name} (Electric)")
+        electric_undisc = self._calculate_annual_costs_undiscounted(electric_vehicle, scenario)
+        
+        logger.info(f"Calculating costs for {diesel_vehicle.name} (Diesel)")
+        diesel_undisc = self._calculate_annual_costs_undiscounted(diesel_vehicle, scenario)
+        
+        results['electric_annual_costs_undiscounted'] = electric_undisc
+        results['diesel_annual_costs_undiscounted'] = diesel_undisc
+        
+        # 2. Apply discounting
+        logger.info("Applying discounting...")
+        electric_disc = self._apply_discounting(electric_undisc, scenario.discount_rate_real)
+        diesel_disc = self._apply_discounting(diesel_undisc, scenario.discount_rate_real)
+        
+        results['electric_annual_costs_discounted'] = electric_disc
+        results['diesel_annual_costs_discounted'] = diesel_disc
+        
+        # 3. Calculate total TCO (sum of *discounted* total costs)
+        total_tco_ev = electric_disc['Total'].sum() if not electric_disc.empty else 0
+        total_tco_diesel = diesel_disc['Total'].sum() if not diesel_disc.empty else 0
+        
+        results['electric_total_tco'] = total_tco_ev
+        results['diesel_total_tco'] = total_tco_diesel
+        logger.info(f"Total Discounted TCO - EV: {total_tco_ev:,.2f}, Diesel: {total_tco_diesel:,.2f}")
+        
+        # 4. Calculate Levelized Cost of Driving (LCOD) using discounted TCO
+        results['electric_lcod'] = self._calculate_lcod(total_tco_ev, scenario)
+        results['diesel_lcod'] = self._calculate_lcod(total_tco_diesel, scenario)
+        
+        # 5. Find parity year using *undiscounted* cumulative costs
+        results['parity_year'] = self._find_parity_year_undiscounted(
+            electric_undisc['Total'].cumsum(),
+            diesel_undisc['Total'].cumsum(),
+            electric_undisc['Year']  # Pass Year series for mapping index to year
+        )
+        
+        return results
+    
+    def _calculate_comparison_metrics(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate and add comparison metrics to results."""
+        # Add LCOD comparison metrics
+        ev_lcod = results.get('electric_lcod')
+        diesel_lcod = results.get('diesel_lcod')
+        
+        if ev_lcod is not None and diesel_lcod is not None:
+            results['lcod_difference'] = diesel_lcod - ev_lcod
+            results['lcod_percentage_savings'] = ((diesel_lcod - ev_lcod) / diesel_lcod * 100) if diesel_lcod > 0 else 0
+        
+        # Add TCO comparison metrics
+        ev_tco = results.get('electric_total_tco', 0)
+        diesel_tco = results.get('diesel_total_tco', 0)
+        
+        results['tco_difference'] = diesel_tco - ev_tco
+        results['tco_ev_to_diesel_ratio'] = ev_tco / diesel_tco if diesel_tco != 0 else float('inf')
+        
+        # Add parity information
+        parity_year = results.get('parity_year')
+        if parity_year:
+            results['years_to_parity'] = parity_year - 1  # First year is year 1, so adjust for years count
+            logger.info(f"Undiscounted TCO Parity Year: {parity_year}")
+        else:
+            results['years_to_parity'] = None
+            logger.info("Undiscounted TCO Parity not reached in analysis period")
+            
+        return results
+    
+    def _record_calculation_time(self, start_time: float, results: Dict[str, Any]) -> None:
+        """Record the calculation time and add to results."""
+        elapsed = time.time() - start_time
+        self._performance_stats.record("total_calculation", elapsed)
+        results['calculation_time_seconds'] = round(elapsed, 4)
     
     def invalidate_calculation_cache(self) -> None:
         """
@@ -418,11 +401,11 @@ class TCOCalculator:
         Returns:
             Dictionary with performance metrics
         """
-        return self._performance_stats.get_report()
+        return performance_monitor.get_report()
     
     def reset_performance_stats(self) -> None:
         """Reset all performance tracking metrics."""
-        self._performance_stats.reset()
+        performance_monitor.reset()
 
     @timed("lcod_calculation")
     def _calculate_lcod(self, total_discounted_tco: float, scenario: Scenario) -> Optional[float]:

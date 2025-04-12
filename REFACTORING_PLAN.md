@@ -33,6 +33,19 @@ This document outlines the step-by-step plan for improving the Australian Heavy 
 - Improve the flattening/unflattening operations
 - Use Pydantic models more effectively for validation
 
+### 4.1 Refactor Model Calculations
+- Simplified the calculation flow in `TCOCalculator` by breaking it into smaller, focused methods
+- Split complex methods into smaller functions with clear responsibilities
+- Added comprehensive error handling and improved logging
+- Created a modular structure for easier maintenance and testing
+
+### 4.3 Optimize Performance
+- Implemented NumPy vectorized operations for critical calculation paths
+- Created a dedicated optimization module for performance utilities
+- Added intelligent caching with parameterized keys
+- Implemented batch processing for large datasets to reduce memory pressure
+- Optimized memory usage with efficient data structures
+
 ## Pending Tasks
 
 ### 2. Data Management
@@ -62,9 +75,9 @@ This document outlines the step-by-step plan for improving the Australian Heavy 
 ### 4. Model Enhancement
 
 #### 4.1 Refactor Model Calculations
-- [ ] Simplify the calculation flow in `TCOCalculator`
-- [ ] Split complex methods into smaller functions
-- [ ] Improve error handling and reporting
+- [x] Simplify the calculation flow in `TCOCalculator`
+- [x] Split complex methods into smaller functions
+- [x] Improve error handling and reporting
 
 #### 4.2 Implement Advanced Features
 - [ ] Add sensitivity analysis capabilities
@@ -72,9 +85,9 @@ This document outlines the step-by-step plan for improving the Australian Heavy 
 - [ ] Add export functionality for results
 
 #### 4.3 Optimize Performance
-- [ ] Profile and optimize calculation bottlenecks
-- [ ] Implement more effective caching strategies
-- [ ] Reduce memory usage for large datasets
+- [x] Profile and optimize calculation bottlenecks
+- [x] Implement more effective caching strategies
+- [x] Reduce memory usage for large datasets
 
 ### 5. Testing and Documentation
 

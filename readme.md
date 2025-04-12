@@ -14,6 +14,8 @@ This application provides a robust Python-based TCO modelling tool with an inter
 - **Interactive Visualisations**: Dynamic charts for TCO evolution, cost breakdowns, and parity points
 - **Sensitivity Analysis**: Identify which factors have the greatest impact on TCO outcomes
 - **Australian Context**: Built specifically with Australian market data, costs, and regulations in mind
+- **High Performance**: Optimized calculation engine with vectorized operations and caching for fast analysis
+- **Modular Architecture**: Clean separation of concerns for easy extensibility and maintenance
 
 ## Installation
 
@@ -88,6 +90,7 @@ tco-model/
 │   ├── __init__.py
 │   ├── model.py             # TCO model core classes
 │   ├── components.py        # Cost component classes
+│   ├── optimizations.py     # Performance optimization utilities
 │   ├── scenarios.py         # Scenario management
 │   ├── validators.py        # Data validation logic
 │   └── vehicles.py          # Vehicle classes
@@ -125,6 +128,26 @@ Additional documentation can be found in the `docs/` directory:
 - [Implementation Guide](docs/implementation_guide.md)
 - [UI Design Plan](docs/ui_design.md)
 - [Testing Strategy](docs/testing.md)
+
+## Recent Improvements
+
+As outlined in the [Refactoring Plan](REFACTORING_PLAN.md), the following enhancements have been implemented:
+
+### Model Optimization
+
+- **Modular Calculation Logic**: The TCO calculation flow has been reorganized into smaller, focused methods for better maintainability
+- **Vectorized Operations**: Replaced iterative calculations with NumPy vectorized operations for significant performance improvements
+- **Batch Processing**: Implemented batch processing for large datasets to reduce memory pressure and improve calculation speed
+- **Improved Caching**: Added an intelligent caching system to avoid redundant calculations
+- **Enhanced Performance Monitoring**: Added comprehensive performance tracking to identify and address bottlenecks
+- **Better Error Handling**: Improved error reporting and recovery mechanisms throughout the calculation pipeline
+
+### Architecture Improvements
+
+- **Dedicated Optimizations Module**: Centralized performance utilities in a reusable module
+- **Simplified API**: Streamlined the model interface for easier integration and testing
+- **Consistent Naming Conventions**: Standardized naming throughout the codebase for better readability
+- **Enhanced Documentation**: Added comprehensive docstrings and code comments
 
 ## Contributing
 
