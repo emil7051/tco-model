@@ -79,31 +79,41 @@ This will open the application in your default web browser at http://localhost:8
 ## Project Structure
 
 ```
-aus-heavy-vehicle-tco/
+tco-model/
 ├── app.py                   # Main Streamlit application entry point
 ├── requirements.txt         # Project dependencies
 ├── README.md                # This file
+├── REFACTORING_PLAN.md      # Documentation of refactoring tasks and progress
 ├── tco_model/               # Core TCO calculation logic
 │   ├── __init__.py
 │   ├── model.py             # TCO model core classes
 │   ├── components.py        # Cost component classes
-│   ├── vehicles.py          # Vehicle classes
-│   └── scenarios.py         # Scenario management
+│   ├── scenarios.py         # Scenario management
+│   ├── validators.py        # Data validation logic
+│   └── vehicles.py          # Vehicle classes
+├── ui/                      # User interface components
+│   ├── __init__.py
+│   ├── inputs.py            # Input form components
+│   ├── layout.py            # Page layout components
+│   ├── outputs.py           # Results visualization components
+│   └── state.py             # Session state management
 ├── utils/                   # Utility functions and helpers
 │   ├── __init__.py
+│   ├── conversions.py       # Unit conversion utilities
+│   ├── data_handlers.py     # Data loading/parsing utilities
+│   ├── financial.py         # Financial calculation utilities
 │   ├── plotting.py          # Chart generation functions
-│   ├── calculators.py       # Financial calculation utilities
-│   └── data_handlers.py     # Data loading/parsing utilities
-├── data/                    # Default data and projections
-│   ├── vehicle_specs.yaml   # Default vehicle specifications
-│   ├── energy_prices.yaml   # Energy price projections
-│   ├── battery_costs.yaml   # Battery cost projections
-│   └── incentives.yaml      # Policy incentives data
+│   └── preprocessing.py     # Parameter preprocessing utilities
+├── config/                  # Configuration and constants
+│   ├── constants.py         # Application-wide constants
+│   ├── defaults/            # Default configuration files
+│   └── scenarios/           # Predefined scenario configurations
 └── tests/                   # Test suite
     ├── __init__.py
-    ├── test_model.py
-    ├── test_components.py
-    └── test_scenarios.py
+    ├── test_components.py   # Tests for cost components
+    ├── test_model.py        # Tests for TCO model
+    ├── test_scenarios.py    # Tests for scenario handling
+    └── test_vehicles.py     # Tests for vehicle models
 ```
 
 ## Documentation

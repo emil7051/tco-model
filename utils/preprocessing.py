@@ -4,8 +4,15 @@ Preprocessing utilities for transforming UI parameters to model format.
 This module handles the conversion of flat UI parameters into the nested structure 
 required by the Scenario model.
 """
+# Standard library imports
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
+
+# Third-party imports
+import streamlit as st
+
+# Application-specific imports
+from config.constants import DEFAULT_ANNUAL_REGISTRATION_COST
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +87,6 @@ def _process_battery_replacement_params(params: Dict[str, Any]) -> None:
 
 def _set_vehicle_types_and_lifespans(flat_params: Dict[str, Any], nested_params: Dict[str, Any]) -> None:
     """Extract vehicle types from session state and set lifespans."""
-    import streamlit as st
-    
     original_nested = st.session_state.get('original_nested_scenario', {})
     original_ev = original_nested.get('electric_vehicle', {})
     original_diesel = original_nested.get('diesel_vehicle', {})
@@ -182,13 +187,12 @@ def _map_parameters_to_nested_structure(flat_params: Dict[str, Any], nested_para
 
 def _ensure_registration_costs(flat_params: Dict[str, Any], nested_params: Dict[str, Any]) -> None:
     """Ensure registration costs are properly set for both vehicle types."""
-    default_reg_cost = 5000.0
     reg_cost_from_flat = flat_params.get('annual_registration_cost')
 
     if reg_cost_from_flat is not None and isinstance(reg_cost_from_flat, (int, float)):
         final_reg_cost = reg_cost_from_flat
     else:
-        final_reg_cost = default_reg_cost
+        final_reg_cost = DEFAULT_ANNUAL_REGISTRATION_COST
         logger.warning(f"'annual_registration_cost' key not found or invalid. Using default: {final_reg_cost}")
 
     if 'electric_vehicle' in nested_params:

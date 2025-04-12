@@ -14,24 +14,24 @@ from ui.outputs import display_results
 from tco_model.model import TCOCalculator
 from tco_model.scenarios import Scenario
 from utils.preprocessing import preprocess_ui_params  # Import the new preprocessing module
+from config.constants import (
+    PAGE_TITLE, PAGE_ICON, PAGE_LAYOUT, SIDEBAR_STATE,
+    APP_TITLE, APP_DESCRIPTION, SCENARIO_SUCCESS_MSG,
+    SCENARIO_CONFIG_ERROR_MSG, CALCULATION_ERROR_MSG, CALCULATION_SPINNER_MSG
+)
 
 # --- Main Application Logic --- 
 def main():
     # Setup page configuration
     st.set_page_config(
-        page_title="Heavy Vehicle TCO Modeller",
-        page_icon="🚚",
-        layout="wide",
-        initial_sidebar_state="expanded"
+        page_title=PAGE_TITLE,
+        page_icon=PAGE_ICON,
+        layout=PAGE_LAYOUT,
+        initial_sidebar_state=SIDEBAR_STATE
     )
     
-    st.title("Australian Heavy Vehicle TCO Modeller")
-    st.markdown("""
-    Compare the Total Cost of Ownership (TCO) for Battery Electric Trucks (BETs) 
-    and Internal Combustion Engine (ICE) diesel trucks in Australia.
-    
-    Adjust parameters in the sidebar to customize your analysis.
-    """)
+    st.title(APP_TITLE)
+    st.markdown(APP_DESCRIPTION)
 
     # Initialize session state (loads default scenario if needed)
     initialize_session_state()
@@ -51,10 +51,10 @@ def main():
 
         # 3. Validate and create the Scenario object using the updated nested structure
         scenario = Scenario(**processed_nested_params)
-        st.sidebar.success("Scenario parameters loaded successfully.")
+        st.sidebar.success(SCENARIO_SUCCESS_MSG)
 
     except ValidationError as e:
-        st.sidebar.error("Scenario Configuration Error:")
+        st.sidebar.error(SCENARIO_CONFIG_ERROR_MSG)
         # Display specific validation errors nicely
         error_details = e.errors()
         for error in error_details:
@@ -71,10 +71,10 @@ def main():
         calculator = TCOCalculator()
         try:
             # Use st.spinner for feedback during calculation
-            with st.spinner("Calculating TCO... Please wait."):
+            with st.spinner(CALCULATION_SPINNER_MSG):
                 results = calculator.calculate(scenario)
         except Exception as e:
-            st.error(f"Error during TCO calculation: {e}")
+            st.error(f"{CALCULATION_ERROR_MSG} {e}")
             # Store error in results dict for display
             results = {"error": str(e)}
     

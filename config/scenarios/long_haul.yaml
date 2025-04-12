@@ -1,0 +1,66 @@
+name: "Long Haul Default"
+description: "Default scenario for a long-haul truck comparison in Australian conditions."
+analysis_years: 15 # e.g., 2025 to 2039 inclusive
+
+# Economic
+discount_rate_real: 0.05 # Example real discount rate
+
+# Operational
+annual_mileage: 150000 # km/year - Higher mileage for long-haul
+electric_maintenance_cost_per_km: 0.08 # AUD/km
+diesel_maintenance_cost_per_km: 0.15 # AUD/km
+annual_registration_cost: 6000 # AUD/year (base year)
+
+# Electric Vehicle
+electric_vehicle:
+  name: "Long Haul EV (Default)"
+  purchase_price: 550000 # AUD - Higher cost for long-haul BEV
+  residual_value_percent: 0.12 # Proportion of purchase price after analysis_years
+  energy_consumption_kwh_per_km: 1.2 # kWh/km - Higher consumption for heavier vehicle
+  maintenance_cost_per_km: 0.08 # AUD/km (base year)
+  insurance_cost_percent: 0.025 # % of purchase price (base year)
+  registration_cost: 6000 # AUD/year (base year)
+  battery_capacity_kwh: 600 # kWh - Larger battery for long-haul
+  battery_replacement_cost_per_kwh: 140 # AUD/kWh
+  battery_cycle_life: 2000 # Cycles
+  battery_depth_of_discharge: 0.85 # DoD
+  charging_efficiency: 0.92 # Grid-to-battery efficiency
+
+# Diesel Vehicle
+diesel_vehicle:
+  name: "Long Haul Diesel (Default)"
+  purchase_price: 350000 # AUD
+  residual_value_percent: 0.10 # Proportion of purchase price after analysis_years
+  fuel_consumption_l_per_100km: 36.0 # L/100km - Higher fuel consumption for long-haul
+  maintenance_cost_per_km: 0.15 # AUD/km (base year)
+  insurance_cost_percent: 0.03 # % of purchase price (base year)
+  registration_cost: 6000 # AUD/year (base year)
+  co2_emission_factor: 2.68 # kg CO2e/L
+
+# Infrastructure (EV)
+infrastructure_cost: 120000 # AUD (charger + installation) - Higher power charger
+infrastructure_maintenance_percent: 0.015 # Annual % of upfront cost
+
+# Base Prices/Rates (Year 0 / Initial)
+electricity_price: 0.18 # AUD/kWh - Potentially lower with commercial arrangements
+diesel_price: 1.75 # AUD/L
+carbon_tax_rate: 30.0 # AUD/tonne CO2e
+road_user_charge: 0.0 # AUD/km (Example: Assuming none initially)
+
+# Annual Increase Rates
+electricity_price_increase: 0.02 # 2% annual increase
+diesel_price_increase: 0.018 # 1.8% annual increase
+carbon_tax_increase_rate: 0.05 # 5% annual increase
+road_user_charge_increase_rate: 0.03 # 3% increase (in case introduced later)
+maintenance_increase_rate: 0.015 # 1.5% annual increase
+insurance_increase_rate: 0.02 # 2% annual increase
+registration_increase_rate: 0.01 # 1% annual increase
+
+# Flags / Options
+include_carbon_tax: true
+include_road_user_charge: false # Set to false as rate is 0
+
+# Battery Replacement (EV)
+battery_degradation_rate: 0.025 # 2.5% annual capacity loss - Higher for long-haul duty cycle
+battery_replacement_threshold: 0.70 # Replace if capacity drops below 70%
+force_battery_replacement_year: null # Let degradation trigger it

@@ -1,15 +1,18 @@
-from typing import Dict, Any, List, Optional, Union
+# Standard library imports
+from datetime import datetime
+import logging
+import os
+from typing import Any, Dict, List, Optional, Union
+
+# Third-party imports
 from pydantic import (
-    BaseModel, Field, validator, model_validator, PrivateAttr,
-    field_validator, ValidationInfo, ConfigDict
+    BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo,
+    field_validator, model_validator, validator
 )
 import yaml
-import os
-import logging
-from datetime import datetime
 
-# Import vehicle classes
-from .vehicles import ElectricVehicle, DieselVehicle
+# Application-specific imports
+from .vehicles import DieselVehicle, ElectricVehicle
 
 logger = logging.getLogger(__name__)
 

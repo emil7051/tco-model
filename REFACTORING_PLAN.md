@@ -10,17 +10,17 @@ This document outlines the step-by-step plan for improving the Australian Heavy 
 - ✅ Added proper error handling and validation
 - ✅ Updated app.py to use the new module
 
+### 1.2 ✅ Clean Up Empty Files
+- ✅ Implemented proper layout components in `ui/layout.py`
+- ✅ Implemented unit conversion utilities in `utils/conversions.py`
+- ✅ Implemented financial calculation utilities in `utils/financial.py`
+- ✅ Implemented proper validation in `tco_model/validators.py`
+- ✅ Added common constants to `config/constants.py`
+- ✅ Implemented `config/scenarios/long_haul.yaml`
+
 ## 📋 Pending Tasks
 
 ### 1. Code Structure and Organization
-
-#### 1.2 Clean Up Empty Files
-- [ ] Review and implement or remove `ui/layout.py`
-- [ ] Review and implement or remove `utils/conversions.py`
-- [ ] Review and implement or remove `utils/financial.py`
-- [ ] Implement proper validation in `tco_model/validators.py`
-- [ ] Add common constants to `config/constants.py`
-- [ ] Implement empty `config/scenarios/long_haul.yaml`
 
 #### 1.3 Standardize Project Structure
 - [ ] Create a consistent file naming and organization convention
@@ -99,10 +99,10 @@ This document outlines the step-by-step plan for improving the Australian Heavy 
 
 The recommended order for implementing these changes is:
 
-### Phase 1: Foundation Improvements
-1. Clean up empty files (Task 1.2)
-2. Standardize project structure (Task 1.3)
-3. Add constants and basic validation (Tasks 1.2, 1.3)
+### Phase 1: Foundation Improvements ✅
+1. ✅ Clean up empty files (Task 1.2)
+2. Standardize project structure (Task 1.3) ← **Next Priority**
+3. Add constants and basic validation (Tasks 1.2, 1.3) ✅
 4. Improve documentation (Task 5.2 - initial phase)
 
 ### Phase 2: Data Layer Improvements
