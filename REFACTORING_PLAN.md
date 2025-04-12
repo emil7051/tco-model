@@ -2,33 +2,38 @@
 
 This document outlines the step-by-step plan for improving the Australian Heavy Vehicle TCO Modeller codebase.
 
-## ✅ Completed Tasks
+## Completed Tasks
 
-### 1.1 ✅ Modularize the Preprocessing Logic
-- ✅ Moved `_preprocess_sidebar_params` from `app.py` to `utils/preprocessing.py`
-- ✅ Refactored the preprocessing logic into smaller, focused functions
-- ✅ Added proper error handling and validation
-- ✅ Updated app.py to use the new module
+### 1.1 Modularize the Preprocessing Logic
+- Moved `_preprocess_sidebar_params` from `app.py` to `utils/preprocessing.py`
+- Refactored the preprocessing logic into smaller, focused functions
+- Added proper error handling and validation
+- Updated app.py to use the new module
 
-### 1.2 ✅ Clean Up Empty Files
-- ✅ Implemented proper layout components in `ui/layout.py`
-- ✅ Implemented unit conversion utilities in `utils/conversions.py`
-- ✅ Implemented financial calculation utilities in `utils/financial.py`
-- ✅ Implemented proper validation in `tco_model/validators.py`
-- ✅ Added common constants to `config/constants.py`
-- ✅ Implemented `config/scenarios/long_haul.yaml`
+### 1.2 Clean Up Empty Files
+- Implemented proper layout components in `ui/layout.py`
+- Implemented unit conversion utilities in `utils/conversions.py`
+- Implemented financial calculation utilities in `utils/financial.py`
+- Implemented proper validation in `tco_model/validators.py`
+- Added common constants to `config/constants.py`
+- Implemented `config/scenarios/long_haul.yaml`
 
-### 1.3 ✅ Standardize Project Structure
-- ✅ Create a consistent file naming and organization convention
-- ✅ Move magic numbers and strings to constants
-- ✅ Document the project structure in README.md
+### 1.3 Standardize Project Structure
+- Create a consistent file naming and organization convention
+- Move magic numbers and strings to constants
+- Document the project structure in README.md
 
-### 2.1 ✅ Centralize Data Handling
-- ✅ Enhance `utils/data_handlers.py` to handle all data loading
-- ✅ Implement caching using Streamlit's caching mechanisms
-- ✅ Create a consistent interface for loading different data types
+### 2.1 Centralize Data Handling
+- Enhance `utils/data_handlers.py` to handle all data loading
+- Implement caching using Streamlit's caching mechanisms
+- Create a consistent interface for loading different data types
 
-## 📋 Pending Tasks
+### 2.3 Improve Data Flow
+- Simplify the flow between session state, UI components, and model
+- Improve the flattening/unflattening operations
+- Use Pydantic models more effectively for validation
+
+## Pending Tasks
 
 ### 2. Data Management
 
@@ -36,11 +41,6 @@ This document outlines the step-by-step plan for improving the Australian Heavy 
 - [ ] Add versioning for configuration files
 - [ ] Create schema validation for YAML configuration files
 - [ ] Add documentation on data format specifications
-
-#### 2.3 Improve Data Flow
-- [ ] Simplify the flow between session state, UI components, and model
-- [ ] Improve the flattening/unflattening operations
-- [ ] Use Pydantic models more effectively for validation
 
 ### 3. UI Improvements
 
@@ -97,16 +97,16 @@ This document outlines the step-by-step plan for improving the Australian Heavy 
 
 The recommended order for implementing these changes is:
 
-### Phase 1: Foundation Improvements ✅
-1. ✅ Clean up empty files (Task 1.2)
-2. ✅ Standardize project structure (Task 1.3)
-3. Add constants and basic validation (Tasks 1.2, 1.3) ✅
+### Phase 1: Foundation Improvements 
+1. Clean up empty files (Task 1.2)
+2. Standardize project structure (Task 1.3)
+3. Add constants and basic validation (Tasks 1.2, 1.3) 
 4. Improve documentation (Task 5.2 - initial phase)
 
 ### Phase 2: Data Layer Improvements
-1. ✅ Centralize data handling (Task 2.1)
-2. Implement data versioning (Task 2.2)
-3. Improve data flow (Task 2.3)
+1. Centralize data handling (Task 2.1)
+2. Improve data flow (Task 2.3)
+3. Implement data versioning (Task 2.2)
 4. Add tests for data layer (Task 5.1 - partial)
 
 ### Phase 3: Model Layer Improvements
