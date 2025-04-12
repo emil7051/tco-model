@@ -84,22 +84,30 @@ class TCOCalculator:
         
         # Use cached component instances or create new ones if needed
         for comp_class in self._component_classes:
-            if comp_class not in self._component_cache:
-                self._component_cache[comp_class] = comp_class()
+            # Get or create component instance
+            component = self._get_component_instance(comp_class)
             
-            instance = self._component_cache[comp_class]
-            
-            # Perform applicability checks
-            if not self._is_component_applicable(instance, vehicle, scenario):
+            # Check if component should be applied to this vehicle/scenario
+            if not self._is_component_applicable(component, vehicle, scenario):
                 continue
                 
             # Reset stateful components for a new calculation run
-            if hasattr(instance, 'reset') and callable(getattr(instance, 'reset')):
-                instance.reset()
+            self._reset_component_if_needed(component)
                 
-            applicable_components.append(instance)
+            applicable_components.append(component)
 
         return applicable_components
+
+    def _get_component_instance(self, component_class: Type[CostComponent]) -> CostComponent:
+        """Get a cached component instance or create a new one if not cached."""
+        if component_class not in self._component_cache:
+            self._component_cache[component_class] = component_class()
+        return self._component_cache[component_class]
+    
+    def _reset_component_if_needed(self, component: CostComponent) -> None:
+        """Reset a stateful component if it has a reset method."""
+        if hasattr(component, 'reset') and callable(getattr(component, 'reset')):
+            component.reset()
         
     def _is_component_applicable(self, component: CostComponent, vehicle: Vehicle, scenario: Scenario) -> bool:
         """
@@ -113,16 +121,23 @@ class TCOCalculator:
         Returns:
             True if the component is applicable, False otherwise
         """
-        # Basic applicability checks
-        if isinstance(component, (InfrastructureCost, BatteryReplacementCost)) and not isinstance(vehicle, ElectricVehicle):
-            return False  # Skip EV-only costs for Diesel
+        # EV-specific components (only apply to ElectricVehicle)
+        if isinstance(component, (InfrastructureCost, BatteryReplacementCost)):
+            if not isinstance(vehicle, ElectricVehicle):
+                return False
+                
+            # Additionally check if battery replacement is enabled
+            if isinstance(component, BatteryReplacementCost) and not scenario.enable_battery_replacement:
+                return False
         
+        # Diesel-specific components (only apply to DieselVehicle)
         if isinstance(component, CarbonTaxCost):
             if not isinstance(vehicle, DieselVehicle) or not scenario.include_carbon_tax:
-                return False  # Skip carbon tax if not Diesel or not included
+                return False
         
+        # Components that depend on scenario flags
         if isinstance(component, RoadUserChargeCost) and not scenario.include_road_user_charge:
-            return False  # Skip RUC if not included
+            return False
         
         return True
 
@@ -138,79 +153,119 @@ class TCOCalculator:
         Returns:
             DataFrame with undiscounted annual costs by component and year
         """
+        # Get applicable components for this vehicle and scenario
         applicable_components = self._get_applicable_components(vehicle, scenario)
         component_names = [comp.__class__.__name__ for comp in applicable_components]
         
-        # Use numpy arrays for better performance with vectorized operations
-        years = np.array(range(scenario.analysis_years))
-        calendar_years = np.array([datetime.now().year + year_index for year_index in years])
+        # Initialize base calculation arrays
+        analysis_years = scenario.analysis_years
+        years = np.array(range(analysis_years))
+        calendar_years = np.array([scenario.start_year + year_index for year_index in years])
         
-        # Pre-calculate cumulative mileage for all years
+        # Pre-calculate cumulative mileage for all years (for components that need it)
         mileage_array = np.cumsum(np.full(len(years), scenario.annual_mileage))
         
-        # Initialize the data structure for annual costs using numpy arrays for better performance
-        annual_costs_data = {name: np.zeros(scenario.analysis_years) for name in component_names}
-        annual_costs_data['Year'] = calendar_years
+        # Create dataframe shell
+        annual_costs_data = {
+            'Year': calendar_years,
+            **{name: np.zeros(analysis_years) for name in component_names}
+        }
         
-        # Process components in batches for better performance
-        BATCH_SIZE = 5  # Process years in batches of 5 for better performance
-        
-        for comp_instance in applicable_components:
-            comp_name = comp_instance.__class__.__name__
-            costs = np.zeros(len(years))
-            
-            # Check if component supports vectorized calculation
-            if hasattr(comp_instance, 'calculate_vectorized') and callable(getattr(comp_instance, 'calculate_vectorized')):
-                try:
-                    # Use vectorized calculation if available
-                    vectorized_costs = comp_instance.calculate_vectorized(
-                        years=calendar_years,
-                        vehicle=vehicle,
-                        scenario=scenario,
-                        year_indices=years,
-                        total_mileage_km=mileage_array
-                    )
-                    costs = np.array(vectorized_costs)
-                except Exception as e:
-                    logger.error(f"Error in vectorized calculation for {comp_name}: {e}", exc_info=True)
-                    # Fall back to non-vectorized calculation if vectorized fails
-            
-            # Process in batches if not using vectorized calculation or if vectorized failed
-            if not hasattr(comp_instance, 'calculate_vectorized') or np.all(costs == 0):
-                # Process in batches for better performance
-                for batch_start in range(0, len(years), BATCH_SIZE):
-                    batch_end = min(batch_start + BATCH_SIZE, len(years))
-                    batch_years = years[batch_start:batch_end]
-                    
-                    # Calculate costs for this batch
-                    for i, year_index in enumerate(batch_years):
-                        current_calendar_year = calendar_years[batch_start + i]
-                        try:
-                            cost = comp_instance.calculate_annual_cost(
-                                year=current_calendar_year,
-                                vehicle=vehicle,
-                                scenario=scenario,
-                                calculation_year_index=year_index,
-                                total_mileage_km=mileage_array[batch_start + i]
-                            )
-                            costs[batch_start + i] = cost if pd.notna(cost) else 0.0
-                        except Exception as e:
-                            logger.error(f"Error calculating {comp_name} for {vehicle.name} "
-                                        f"in year index {year_index}: {e}", exc_info=True)
-                            costs[batch_start + i] = np.nan
-            
-            annual_costs_data[comp_name] = costs
+        # Process each component and calculate costs
+        for component in applicable_components:
+            comp_name = component.__class__.__name__
+            annual_costs_data[comp_name] = self._calculate_component_costs(
+                component=component,
+                years=calendar_years,
+                year_indices=years,
+                vehicle=vehicle,
+                scenario=scenario,
+                mileage_array=mileage_array
+            )
         
         # Convert to DataFrame and add a Total column
         df = pd.DataFrame(annual_costs_data)
-        component_cost_columns = [col for col in df.columns if col != 'Year']
-        df['Total'] = df[component_cost_columns].sum(axis=1, skipna=True)
-        
-        # Fill any NaN values with 0 for consistency
-        df = df.fillna(0.0)
+        df = self._add_total_column(df)
         
         # Optimize the dataframe for memory usage
         return optimize_dataframe(df)
+
+    def _calculate_component_costs(self, component, years, year_indices, vehicle, scenario, mileage_array) -> np.ndarray:
+        """
+        Calculate costs for a single component across all years, using vectorized calculation if available.
+        
+        Args:
+            component: Cost component to calculate
+            years: Array of calendar years
+            year_indices: Array of year indices (0-based)
+            vehicle: Vehicle object
+            scenario: Scenario object
+            mileage_array: Array of cumulative mileage values
+            
+        Returns:
+            Array of annual costs for this component
+        """
+        costs = np.zeros(len(years))
+        
+        # Try vectorized calculation first if available
+        if hasattr(component, 'calculate_vectorized') and callable(getattr(component, 'calculate_vectorized')):
+            try:
+                vectorized_costs = component.calculate_vectorized(
+                    years=years,
+                    vehicle=vehicle,
+                    scenario=scenario,
+                    year_indices=year_indices,
+                    total_mileage_km=mileage_array
+                )
+                costs = np.array(vectorized_costs)
+                return costs
+            except Exception as e:
+                logger.error(f"Error in vectorized calculation for {component.__class__.__name__}: {e}", exc_info=True)
+                # Fall back to individual year calculation
+        
+        # Process individual years in batches for better performance
+        BATCH_SIZE = 5
+        for batch_start in range(0, len(years), BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, len(years))
+            batch_years = year_indices[batch_start:batch_end]
+            
+            # Calculate costs for this batch
+            for i, year_index in enumerate(batch_years):
+                current_year = years[batch_start + i]
+                current_mileage = mileage_array[batch_start + i]
+                costs[batch_start + i] = self._calculate_year_cost(
+                    component=component,
+                    year=current_year,
+                    year_index=year_index,
+                    vehicle=vehicle,
+                    scenario=scenario, 
+                    total_mileage_km=current_mileage
+                )
+                
+        return costs
+    
+    def _calculate_year_cost(self, component, year, year_index, vehicle, scenario, total_mileage_km) -> float:
+        """Calculate cost for a specific component and year with error handling."""
+        try:
+            cost = component.calculate_annual_cost(
+                year=year,
+                vehicle=vehicle,
+                scenario=scenario,
+                calculation_year_index=year_index,
+                total_mileage_km=total_mileage_km
+            )
+            return cost if pd.notna(cost) else 0.0
+        except Exception as e:
+            logger.error(f"Error calculating {component.__class__.__name__} for {vehicle.name} "
+                        f"in year index {year_index}: {e}", exc_info=True)
+            return 0.0  # Return zero if calculation fails
+    
+    def _add_total_column(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add a Total column summing all cost components and handle missing values."""
+        component_cost_columns = [col for col in df.columns if col != 'Year']
+        df['Total'] = df[component_cost_columns].sum(axis=1, skipna=True)
+        df = df.fillna(0.0)  # Fill any NaN values with 0 for consistency
+        return df
 
     @timed("discounting")
     def _apply_discounting(self, undiscounted_df: pd.DataFrame, discount_rate: float) -> pd.DataFrame:
@@ -231,12 +286,11 @@ class TCOCalculator:
         # Make a copy to avoid modifying the original
         discounted_df = undiscounted_df.copy()
         
-        # Use vectorized numpy operations for better performance
+        # Calculate discount factors using vectorized operations
         years = np.arange(len(discounted_df))
-        # Calculate discount factors as a numpy array for vectorized multiplication
         discount_factors = 1 / np.power(1 + discount_rate, years)
         
-        # Apply discount factors to all cost columns (exclude 'Year' column) at once
+        # Apply discount factors to all cost columns except 'Year'
         cost_columns = [col for col in discounted_df.columns if col != 'Year']
         discounted_df[cost_columns] = discounted_df[cost_columns].multiply(discount_factors, axis=0)
         

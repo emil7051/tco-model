@@ -1,20 +1,19 @@
 """
 Data mapping utilities for transforming between UI state and model structures.
 
-This module provides a clean, centralized way to transform data between:
+This module provides functionality to transform data between:
 1. UI flat dictionary format (with percentages as 0-100)
 2. Model nested structure format (with percentages as 0-1)
 """
 
 from typing import Dict, Any, List, Optional, Union
 import logging
-from pydantic import BaseModel, Field, validator
 
 logger = logging.getLogger(__name__)
 
 # ---- Constants ----
 
-# Keys that represent percentages in the model
+# Keys that represent percentages in the model (0-1 in model, 0-100 in UI)
 PERCENTAGE_KEYS = [
     'discount_rate_real', 'inflation_rate', 'interest_rate',
     'down_payment_pct', 'battery_replacement_threshold',
@@ -44,8 +43,8 @@ FLOAT_KEYS = [
     'diesel_vehicle_fuel_consumption', 'electric_vehicle_battery_capacity'
 ]
 
-# Mapping from model keys to UI display keys
-MODEL_TO_UI_KEY_MAP = {
+# Mapping between model and UI keys
+MODEL_TO_UI_KEYS = {
     # Vehicle-specific
     'purchase_price': 'price',
     'battery_capacity_kwh': 'battery_capacity',
@@ -60,10 +59,18 @@ MODEL_TO_UI_KEY_MAP = {
     'selected_installation_cost': 'charger_installation_cost',
 }
 
-# Mapping from UI display keys back to model keys
-UI_TO_MODEL_KEY_MAP = {v: k for k, v in MODEL_TO_UI_KEY_MAP.items()}
+# Reverse mapping from UI to model keys
+UI_TO_MODEL_KEYS = {v: k for k, v in MODEL_TO_UI_KEYS.items()}
 
-# ---- Utility Functions ----
+# Complex nested structures to preserve as-is
+COMPLEX_NESTED_KEYS = [
+    'infrastructure_costs', 'electricity_price_projections',
+    'diesel_price_scenarios', 'maintenance_costs_detailed',
+    'insurance_and_registration', 'residual_value_projections', 
+    'battery_pack_cost_projections_aud_per_kwh'
+]
+
+# ---- Mapping Between UI and Model ----
 
 def flatten_scenario_dict(nested_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -78,22 +85,17 @@ def flatten_scenario_dict(nested_dict: Dict[str, Any]) -> Dict[str, Any]:
     try:
         flat_dict = {}
         
-        # Process electric vehicle data
-        if 'electric_vehicle' in nested_dict:
-            _flatten_vehicle_dict(nested_dict['electric_vehicle'], 'electric_vehicle', flat_dict)
-        else:
-            logger.warning("No 'electric_vehicle' key found in nested dictionary")
-        
-        # Process diesel vehicle data
-        if 'diesel_vehicle' in nested_dict:
-            _flatten_vehicle_dict(nested_dict['diesel_vehicle'], 'diesel_vehicle', flat_dict)
-        else:
-            logger.warning("No 'diesel_vehicle' key found in nested dictionary")
+        # Process electric & diesel vehicle data
+        for vehicle_type in ['electric_vehicle', 'diesel_vehicle']:
+            if vehicle_type in nested_dict:
+                flatten_vehicle_dict(nested_dict[vehicle_type], vehicle_type, flat_dict)
+            else:
+                logger.warning(f"No '{vehicle_type}' key found in nested dictionary")
         
         # Process top-level keys
         for key, value in nested_dict.items():
             if key not in ['electric_vehicle', 'diesel_vehicle']:
-                _process_top_level_key(key, value, flat_dict)
+                process_top_level_key(key, value, flat_dict)
         
         # Ensure default values for essential fields
         if 'analysis_years' not in flat_dict:
@@ -101,13 +103,12 @@ def flatten_scenario_dict(nested_dict: Dict[str, Any]) -> Dict[str, Any]:
             logger.info("Applied default analysis_years=15")
             
         # Ensure numeric types are correct
-        _ensure_numeric_types(flat_dict)
+        ensure_numeric_types(flat_dict)
         
         return flat_dict
     
     except Exception as e:
         logger.error(f"Error flattening scenario dict: {e}", exc_info=True)
-        # Return at least an empty dict to prevent further errors
         return {}
 
 def unflatten_to_scenario_dict(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -125,26 +126,28 @@ def unflatten_to_scenario_dict(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
         working_dict = flat_dict.copy()
         
         # Apply intelligent defaults based on context
-        _apply_intelligent_defaults(working_dict)
+        apply_intelligent_defaults(working_dict)
         
         # Ensure numeric types are correct
-        _ensure_numeric_types(working_dict)
+        ensure_numeric_types(working_dict)
         
-        nested_dict = {}
-        nested_dict['electric_vehicle'] = {}
-        nested_dict['diesel_vehicle'] = {}
+        # Initialize nested structure
+        nested_dict = {
+            'electric_vehicle': {},
+            'diesel_vehicle': {}
+        }
         
         # Convert UI percentages back to decimals for model
-        _convert_percentages_to_decimals(working_dict)
+        convert_percentages_to_decimals(working_dict)
         
         # Handle battery replacement logic
-        _process_battery_replacement_params(working_dict)
+        process_battery_replacement_params(working_dict)
         
         # Map parameters to the proper nested structure
-        _map_params_to_nested_structure(working_dict, nested_dict)
+        map_params_to_nested_structure(working_dict, nested_dict)
         
         # Check that all required keys are present
-        _validate_required_keys(nested_dict)
+        validate_required_keys(nested_dict)
         
         return nested_dict
     
@@ -154,26 +157,19 @@ def unflatten_to_scenario_dict(flat_dict: Dict[str, Any]) -> Dict[str, Any]:
 
 # ---- Helper Functions ----
 
-def _flatten_vehicle_dict(vehicle_dict: Dict[str, Any], prefix: str, 
-                         target_dict: Dict[str, Any]) -> None:
-    """
-    Flatten a vehicle dictionary into the target flat dictionary.
-    
-    Args:
-        vehicle_dict: Source vehicle dictionary
-        prefix: Prefix to apply to keys (e.g., 'electric_vehicle')
-        target_dict: Target flat dictionary for results
-    """
+def flatten_vehicle_dict(vehicle_dict: Dict[str, Any], prefix: str, 
+                        target_dict: Dict[str, Any]) -> None:
+    """Flatten a vehicle dictionary into the target flat dictionary."""
     try:
         for key, value in vehicle_dict.items():
             # Handle complex nested structures
-            if isinstance(value, (dict, list)) and key not in ['residual_value_projections', 'battery_pack_cost_projections_aud_per_kwh']:
+            if isinstance(value, (dict, list)) and key in COMPLEX_NESTED_KEYS:
                 logger.debug(f"Preserving complex nested field: {key}")
                 target_dict[f"{prefix}_{key}"] = value
                 continue
                 
             # Map the key name if needed
-            ui_key = MODEL_TO_UI_KEY_MAP.get(key, key)
+            ui_key = MODEL_TO_UI_KEYS.get(key, key)
             flat_key = f"{prefix}_{ui_key}" if ui_key != 'name' else f"{prefix}_name"
             
             # Scale percentages for UI display
@@ -184,40 +180,20 @@ def _flatten_vehicle_dict(vehicle_dict: Dict[str, Any], prefix: str,
     except Exception as e:
         logger.error(f"Error flattening {prefix} dict: {e}")
 
-def _process_top_level_key(key: str, value: Any, target_dict: Dict[str, Any]) -> None:
-    """
-    Process a top-level key from the nested dictionary.
-    
-    Args:
-        key: The key to process
-        value: The value to process
-        target_dict: Target flat dictionary for results
-    """
+def process_top_level_key(key: str, value: Any, target_dict: Dict[str, Any]) -> None:
+    """Process a top-level key from the nested dictionary."""
     try:
         # Preserve complex nested structures that UI needs
-        if isinstance(value, (dict, list)) and key in [
-            'infrastructure_costs', 'electricity_price_projections',
-            'diesel_price_scenarios', 'maintenance_costs_detailed',
-            'insurance_and_registration'
-        ]:
+        if isinstance(value, (dict, list)) and key in COMPLEX_NESTED_KEYS:
             target_dict[key] = value
             
             # Special handling for infrastructure nested values
             if key == 'infrastructure_costs':
-                for infra_key, infra_value in value.items():
-                    if infra_key in ['selected_charger_cost', 'selected_installation_cost', 
-                                   'charger_maintenance_percent', 'charger_lifespan']:
-                        ui_key = MODEL_TO_UI_KEY_MAP.get(infra_key, infra_key)
-                        
-                        # Scale percentages for UI
-                        if infra_key in PERCENTAGE_KEYS and infra_value is not None:
-                            target_dict[ui_key] = infra_value * 100.0
-                        else:
-                            target_dict[ui_key] = infra_value
+                process_infrastructure_costs(value, target_dict)
             return
             
         # Standard top-level keys
-        ui_key = MODEL_TO_UI_KEY_MAP.get(key, key)
+        ui_key = MODEL_TO_UI_KEYS.get(key, key)
         
         # Scale percentages for UI display
         if key in PERCENTAGE_KEYS and value is not None:
@@ -227,36 +203,41 @@ def _process_top_level_key(key: str, value: Any, target_dict: Dict[str, Any]) ->
     except Exception as e:
         logger.error(f"Error processing top-level key {key}: {e}")
 
-def _convert_percentages_to_decimals(params: Dict[str, Any]) -> None:
-    """
-    Convert percentage values from UI (0-100) to decimal values (0-1) for the model.
-    
-    Args:
-        params: Dictionary to process (modified in-place)
-    """
+def process_infrastructure_costs(infra_costs: Dict[str, Any], target_dict: Dict[str, Any]) -> None:
+    """Process infrastructure costs from nested to flat structure."""
     try:
-        ui_percent_keys = [UI_TO_MODEL_KEY_MAP.get(k, k) for k in UI_TO_MODEL_KEY_MAP]
-        ui_percent_keys.extend([
-            'discount_rate', 'inflation_rate', 'interest_rate',
-            'down_payment_pct', 'battery_replacement_threshold',
-            'charger_maintenance_percent'
-        ])
+        for infra_key, infra_value in infra_costs.items():
+            if infra_key in ['selected_charger_cost', 'selected_installation_cost', 
+                           'charger_maintenance_percent', 'charger_lifespan']:
+                ui_key = MODEL_TO_UI_KEYS.get(infra_key, infra_key)
+                
+                # Scale percentages for UI
+                if infra_key in PERCENTAGE_KEYS and infra_value is not None:
+                    target_dict[ui_key] = infra_value * 100.0
+                else:
+                    target_dict[ui_key] = infra_value
+    except Exception as e:
+        logger.error(f"Error processing infrastructure costs: {e}")
+
+def convert_percentages_to_decimals(params: Dict[str, Any]) -> None:
+    """Convert percentage values from UI (0-100) to decimal values (0-1) for the model."""
+    try:
+        # Combine UI and model percentage keys
+        percentage_keys = list(PERCENTAGE_KEYS)
+        percentage_keys.extend([UI_TO_MODEL_KEYS.get(k, k) for k in UI_TO_MODEL_KEYS 
+                               if UI_TO_MODEL_KEYS.get(k, k) in PERCENTAGE_KEYS])
         
-        for key in ui_percent_keys:
+        # Convert each percentage value
+        for key in percentage_keys:
             if key in params and isinstance(params[key], (int, float)) and params[key] is not None:
                 params[key] = params[key] / 100.0
         
-        logger.debug(f"Converted percentage values to decimals")
+        logger.debug("Converted percentage values to decimals")
     except Exception as e:
         logger.error(f"Error converting percentages to decimals: {e}")
 
-def _process_battery_replacement_params(params: Dict[str, Any]) -> None:
-    """
-    Handle conditional battery replacement logic based on UI selection.
-    
-    Args:
-        params: Dictionary to process (modified in-place)
-    """
+def process_battery_replacement_params(params: Dict[str, Any]) -> None:
+    """Handle conditional battery replacement logic based on UI selection."""
     try:
         if 'battery_replace_mode' in params:
             if params['battery_replace_mode'] == "Fixed Year":
@@ -273,13 +254,8 @@ def _process_battery_replacement_params(params: Dict[str, Any]) -> None:
     except Exception as e:
         logger.error(f"Error processing battery replacement parameters: {e}")
 
-def _ensure_numeric_types(params: Dict[str, Any]) -> None:
-    """
-    Ensure numeric fields have the correct types.
-    
-    Args:
-        params: Dictionary to process (modified in-place)
-    """
+def ensure_numeric_types(params: Dict[str, Any]) -> None:
+    """Ensure numeric fields have the correct types."""
     try:
         # Process integer fields
         for key in INTEGER_KEYS:
@@ -299,43 +275,16 @@ def _ensure_numeric_types(params: Dict[str, Any]) -> None:
     except Exception as e:
         logger.error(f"Error ensuring numeric types: {e}")
 
-def _apply_intelligent_defaults(params: Dict[str, Any]) -> None:
-    """
-    Apply intelligent defaults based on context.
-    
-    Args:
-        params: Dictionary to process (modified in-place)
-    """
+def apply_intelligent_defaults(params: Dict[str, Any]) -> None:
+    """Apply intelligent defaults based on context."""
     try:
         # Default financing parameters if method is 'loan'
         if params.get('financing_method') == 'loan':
-            if 'loan_term' not in params or params['loan_term'] is None:
-                params['loan_term'] = 5
-                logger.info("Applied default loan_term=5 for loan financing method")
-            if 'interest_rate' not in params or params['interest_rate'] is None:
-                params['interest_rate'] = 5.0  # 5%
-                logger.info("Applied default interest_rate=5.0% for loan financing method")
-            if 'down_payment_pct' not in params or params['down_payment_pct'] is None:
-                params['down_payment_pct'] = 20.0  # 20%
-                logger.info("Applied default down_payment_pct=20.0% for loan financing method")
+            apply_loan_defaults(params)
             
         # Battery replacement defaults
         if params.get('enable_battery_replacement', False):
-            if 'battery_replace_mode' not in params:
-                params['battery_replace_mode'] = "Fixed Year"
-                logger.info("Applied default battery replacement mode 'Fixed Year'")
-                
-            if params.get('battery_replace_mode') == "Fixed Year":
-                if 'battery_replacement_year' not in params or params['battery_replacement_year'] is None:
-                    # Set to middle of analysis period if possible
-                    analysis_years = params.get('analysis_years', 15)
-                    params['battery_replacement_year'] = max(1, min(analysis_years - 1, analysis_years // 2))
-                    logger.info(f"Applied default battery_replacement_year={params['battery_replacement_year']}")
-                    
-            elif params.get('battery_replace_mode') == "Capacity Threshold":
-                if 'battery_replacement_threshold' not in params or params['battery_replacement_threshold'] is None:
-                    params['battery_replacement_threshold'] = 70.0  # 70%
-                    logger.info("Applied default battery_replacement_threshold=70.0%")
+            apply_battery_defaults(params)
                     
         # General defaults
         if 'discount_rate' not in params or params['discount_rate'] is None:
@@ -349,16 +298,40 @@ def _apply_intelligent_defaults(params: Dict[str, Any]) -> None:
     except Exception as e:
         logger.error(f"Error applying intelligent defaults: {e}")
 
-def _map_params_to_nested_structure(flat_params: Dict[str, Any], 
-                                   nested_params: Dict[str, Any]) -> None:
-    """
-    Map parameters from flat structure to nested structure based on defined mapping.
-    
-    Args:
-        flat_params: Source flat dictionary
-        nested_params: Target nested dictionary
-    """
-    # Define the key mapping (flat_key, target_dict, final_key)
+def apply_loan_defaults(params: Dict[str, Any]) -> None:
+    """Apply default loan parameters when financing method is 'loan'."""
+    if 'loan_term' not in params or params['loan_term'] is None:
+        params['loan_term'] = 5
+        logger.info("Applied default loan_term=5 for loan financing method")
+    if 'interest_rate' not in params or params['interest_rate'] is None:
+        params['interest_rate'] = 5.0  # 5%
+        logger.info("Applied default interest_rate=5.0% for loan financing method")
+    if 'down_payment_pct' not in params or params['down_payment_pct'] is None:
+        params['down_payment_pct'] = 20.0  # 20%
+        logger.info("Applied default down_payment_pct=20.0% for loan financing method")
+
+def apply_battery_defaults(params: Dict[str, Any]) -> None:
+    """Apply default battery replacement parameters."""
+    if 'battery_replace_mode' not in params:
+        params['battery_replace_mode'] = "Fixed Year"
+        logger.info("Applied default battery replacement mode 'Fixed Year'")
+        
+    if params.get('battery_replace_mode') == "Fixed Year":
+        if 'battery_replacement_year' not in params or params['battery_replacement_year'] is None:
+            # Set to middle of analysis period if possible
+            analysis_years = params.get('analysis_years', 15)
+            params['battery_replacement_year'] = max(1, min(analysis_years - 1, analysis_years // 2))
+            logger.info(f"Applied default battery_replacement_year={params['battery_replacement_year']}")
+            
+    elif params.get('battery_replace_mode') == "Capacity Threshold":
+        if 'battery_replacement_threshold' not in params or params['battery_replacement_threshold'] is None:
+            params['battery_replacement_threshold'] = 70.0  # 70%
+            logger.info("Applied default battery_replacement_threshold=70.0%")
+
+def map_params_to_nested_structure(flat_params: Dict[str, Any], 
+                                 nested_params: Dict[str, Any]) -> None:
+    """Map parameters from flat structure to nested structure based on defined mapping."""
+    # Define the key mapping (flat_key, target_category, final_key)
     key_mapping = [
         # Scenario top-level
         ('name', 'scenario', 'name'),
@@ -408,15 +381,17 @@ def _map_params_to_nested_structure(flat_params: Dict[str, Any],
         ('diesel_vehicle_co2_emission_factor', 'diesel', 'co2_emission_factor')
     ]
 
-    for flat_key, target_dict_name, final_key in key_mapping:
+    # Map each parameter
+    for flat_key, target_category, final_key in key_mapping:
         try:
             if flat_key in flat_params:
                 value = flat_params[flat_key]
-                if target_dict_name == 'scenario':
+                
+                if target_category == 'scenario':
                     nested_params[final_key] = value
-                elif target_dict_name == 'ev':
+                elif target_category == 'ev':
                     nested_params['electric_vehicle'][final_key] = value
-                elif target_dict_name == 'diesel':
+                elif target_category == 'diesel':
                     nested_params['diesel_vehicle'][final_key] = value
             else:
                 # Skip warning for conditionally removed battery parameters
@@ -431,18 +406,9 @@ def _map_params_to_nested_structure(flat_params: Dict[str, Any],
                         logger.debug(f"Optional key '{flat_key}' not found during mapping to {final_key}")
         except Exception as e:
             logger.error(f"Error mapping {flat_key} to {final_key}: {e}")
-            # Continue processing other keys rather than failing completely
 
-def _validate_required_keys(nested_params: Dict[str, Any]) -> None:
-    """
-    Validate that all required keys are present in the nested structure.
-    
-    Args:
-        nested_params: The nested dictionary to validate
-        
-    Raises:
-        ValueError: If any required keys are missing
-    """
+def validate_required_keys(nested_params: Dict[str, Any]) -> None:
+    """Validate that all required keys are present in the nested structure."""
     missing_keys = []
     
     # Check top-level required keys
@@ -472,11 +438,7 @@ def _validate_required_keys(nested_params: Dict[str, Any]) -> None:
         raise ValueError(error_msg)
 
 def invalidate_calculation_cache():
-    """
-    Invalidate any cached calculation results when parameters change.
-    
-    Should be called whenever scenario parameters are changed.
-    """
+    """Invalidate any cached calculation results when parameters change."""
     import streamlit as st
     if 'cached_results' in st.session_state:
         del st.session_state['cached_results']
