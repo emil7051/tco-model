@@ -6,9 +6,11 @@ This module provides widgets that are rendered in the Streamlit sidebar.
 
 import streamlit as st
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Any, Optional, List
+from abc import abstractmethod
 
 from ui.widgets.base import BaseWidget
+from tco_model.scenarios import Scenario
 
 logger = logging.getLogger(__name__)
 
@@ -28,23 +30,23 @@ class SidebarWidget(BaseWidget):
         self.section_title = section_title
         self.expanded = expanded
         
-    def render(self, params: Dict[str, Any]) -> None:
+    def render(self, scenario: Scenario) -> None:
         """
         Render the input section in an expander.
         
         Args:
-            params: Current parameters from session state
+            scenario: The current Scenario object from session state
         """
         with st.sidebar.expander(self.section_title, expanded=self.expanded):
-            self.render_content(params)
+            self.render_content(scenario)
     
     @abstractmethod
-    def render_content(self, params: Dict[str, Any]) -> None:
+    def render_content(self, scenario: Scenario) -> None:
         """
         Render the content inside the expander.
         
         Args:
-            params: Current parameters from session state
+            scenario: The current Scenario object from session state
         """
         pass
 
@@ -62,15 +64,15 @@ class SidebarManager(BaseWidget):
         super().__init__()
         self.sections = sections
     
-    def render(self, params: Dict[str, Any]) -> None:
+    def render(self, scenario: Scenario) -> None:
         """
         Render the complete sidebar with all sections.
         
         Args:
-            params: Current parameters from session state
+            scenario: The current Scenario object from session state
         """
         st.sidebar.title("Scenario Parameters")
         
         # Render each section
         for section in self.sections:
-            section.render(params) 
+            section.render(scenario) 

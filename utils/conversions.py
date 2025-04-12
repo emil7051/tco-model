@@ -8,14 +8,25 @@ This module includes functions for:
 """
 # Standard library imports
 import datetime
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, NewType, Any
 
 # Application-specific imports
 from config.constants import (
     DEFAULT_CURRENCY, DIESEL_ENERGY_CONTENT, KWH_TO_MJ_FACTOR
 )
 
-def percentage_to_decimal(percentage: float) -> float:
+# Custom Types
+Percentage = NewType('Percentage', float)
+Decimal = NewType('Decimal', float)
+LitersPer100KM = NewType('LitersPer100KM', float)
+KWHPerKM = NewType('KWHPerKM', float)
+KWH = NewType('KWH', float)
+MJ = NewType('MJ', float)
+YearIndex = NewType('YearIndex', int)
+AUD = NewType('AUD', float)
+Kilometres = NewType('Kilometres', float)
+
+def percentage_to_decimal(percentage: Percentage) -> Decimal:
     """
     Convert a percentage value to its decimal equivalent.
     
@@ -25,10 +36,10 @@ def percentage_to_decimal(percentage: float) -> float:
     Returns:
         The decimal equivalent (e.g., 0.075)
     """
-    return percentage / 100.0
+    return Decimal(percentage / 100.0)
 
 
-def decimal_to_percentage(decimal: float) -> float:
+def decimal_to_percentage(decimal: Decimal) -> Percentage:
     """
     Convert a decimal value to its percentage equivalent.
     
@@ -38,10 +49,10 @@ def decimal_to_percentage(decimal: float) -> float:
     Returns:
         The percentage equivalent (e.g., 7.5)
     """
-    return decimal * 100.0
+    return Percentage(decimal * 100.0)
 
 
-def l_per_100km_to_kwh_per_km(fuel_consumption: float, energy_conversion_factor: float = DIESEL_ENERGY_CONTENT) -> float:
+def l_per_100km_to_kwh_per_km(fuel_consumption: LitersPer100KM, energy_conversion_factor: float = DIESEL_ENERGY_CONTENT) -> KWHPerKM:
     """
     Convert diesel fuel consumption in L/100km to energy consumption in kWh/km.
     
@@ -53,10 +64,10 @@ def l_per_100km_to_kwh_per_km(fuel_consumption: float, energy_conversion_factor:
         Energy consumption in kWh/km
     """
     # First convert to L/km, then multiply by energy content
-    return (fuel_consumption / 100.0) * energy_conversion_factor
+    return KWHPerKM((fuel_consumption / 100.0) * energy_conversion_factor)
 
 
-def kwh_per_km_to_l_per_100km(energy_consumption: float, energy_conversion_factor: float = DIESEL_ENERGY_CONTENT) -> float:
+def kwh_per_km_to_l_per_100km(energy_consumption: KWHPerKM, energy_conversion_factor: float = DIESEL_ENERGY_CONTENT) -> LitersPer100KM:
     """
     Convert energy consumption in kWh/km to diesel equivalent in L/100km.
     
@@ -68,10 +79,10 @@ def kwh_per_km_to_l_per_100km(energy_consumption: float, energy_conversion_facto
         Fuel consumption in L/100km
     """
     # Convert to L/km, then to L/100km
-    return (energy_consumption / energy_conversion_factor) * 100.0
+    return LitersPer100KM((energy_consumption / energy_conversion_factor) * 100.0)
 
 
-def kwh_to_mj(kwh: float) -> float:
+def kwh_to_mj(kwh: KWH) -> MJ:
     """
     Convert kilowatt-hours to megajoules.
     
@@ -81,10 +92,10 @@ def kwh_to_mj(kwh: float) -> float:
     Returns:
         Energy in megajoules
     """
-    return kwh * KWH_TO_MJ_FACTOR  # 1 kWh = 3.6 MJ
+    return MJ(kwh * KWH_TO_MJ_FACTOR)  # 1 kWh = 3.6 MJ
 
 
-def mj_to_kwh(mj: float) -> float:
+def mj_to_kwh(mj: MJ) -> KWH:
     """
     Convert megajoules to kilowatt-hours.
     
@@ -94,10 +105,10 @@ def mj_to_kwh(mj: float) -> float:
     Returns:
         Energy in kilowatt-hours
     """
-    return mj / KWH_TO_MJ_FACTOR  # 1 kWh = 3.6 MJ
+    return KWH(mj / KWH_TO_MJ_FACTOR)  # 1 kWh = 3.6 MJ
 
 
-def flatten_nested_dict(nested_dict: Dict, parent_key: str = '', separator: str = '_') -> Dict:
+def flatten_nested_dict(nested_dict: Dict[str, Any], parent_key: str = '', separator: str = '_') -> Dict[str, Any]:
     """
     Flatten a nested dictionary structure into a single-level dictionary.
     
@@ -109,7 +120,7 @@ def flatten_nested_dict(nested_dict: Dict, parent_key: str = '', separator: str 
     Returns:
         A flattened dictionary
     """
-    flat_dict = {}
+    flat_dict: Dict[str, Any] = {}
     for key, value in nested_dict.items():
         new_key = f"{parent_key}{separator}{key}" if parent_key else key
         
@@ -121,7 +132,7 @@ def flatten_nested_dict(nested_dict: Dict, parent_key: str = '', separator: str 
     return flat_dict
 
 
-def unflatten_dict(flat_dict: Dict, separator: str = '_') -> Dict:
+def unflatten_dict(flat_dict: Dict[str, Any], separator: str = '_') -> Dict[str, Any]:
     """
     Convert a flattened dictionary back to a nested structure.
     
@@ -132,7 +143,7 @@ def unflatten_dict(flat_dict: Dict, separator: str = '_') -> Dict:
     Returns:
         A nested dictionary
     """
-    result = {}
+    result: Dict[str, Any] = {}
     
     for key, value in flat_dict.items():
         parts = key.split(separator)
@@ -150,7 +161,7 @@ def unflatten_dict(flat_dict: Dict, separator: str = '_') -> Dict:
     return result
 
 
-def format_currency(value: float, currency: str = DEFAULT_CURRENCY, decimals: int = 0) -> str:
+def format_currency(value: Union[float, AUD], currency: str = DEFAULT_CURRENCY, decimals: int = 0) -> str:
     """
     Format a value as currency.
     
@@ -168,7 +179,7 @@ def format_currency(value: float, currency: str = DEFAULT_CURRENCY, decimals: in
         return f"{currency} {value:,.{decimals}f}"
 
 
-def format_percentage(value: float, decimals: int = 1) -> str:
+def format_percentage(value: Union[float, Decimal], decimals: int = 1) -> str:
     """
     Format a decimal value as a percentage string.
     
@@ -179,14 +190,16 @@ def format_percentage(value: float, decimals: int = 1) -> str:
     Returns:
         Formatted percentage string (e.g., "7.5%")
     """
-    return f"{value * 100:.{decimals}f}%"
+    # Ensure the input is treated as a float for formatting
+    float_value = float(value)
+    return f"{float_value * 100:.{decimals}f}%"
 
 
 def calculate_annual_projection(
-    base_value: float, 
-    annual_increase_rate: float, 
-    year_index: int
-) -> float:
+    base_value: Union[float, AUD],
+    annual_increase_rate: Decimal,
+    year_index: YearIndex
+) -> Union[float, AUD]:
     """
     Calculate a projected value based on a base value and annual increase rate.
     
@@ -198,4 +211,9 @@ def calculate_annual_projection(
     Returns:
         The projected value
     """
-    return base_value * (1 + annual_increase_rate) ** year_index
+    # Determine return type based on input base_value type
+    projected_value = base_value * (1 + annual_increase_rate) ** year_index
+    if isinstance(base_value, AUD):
+        return AUD(projected_value)
+    else:
+        return projected_value

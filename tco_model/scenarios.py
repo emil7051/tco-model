@@ -16,376 +16,496 @@ from .vehicles import DieselVehicle, ElectricVehicle
 
 logger = logging.getLogger(__name__)
 
-class Scenario(BaseModel):
-    """Represents a TCO calculation scenario with all input parameters.
 
-    Holds configuration for the analysis period, economic factors, operational assumptions,
-    vehicle specifications (as nested objects), and cost parameters.
-    Automatically calculates annual price series for escalating costs.
-    """
+# --- Component Models for Scenario ---
+
+class EconomicParameters(BaseModel):
+    discount_rate_percent_real: float = Field(..., description="Real annual discount rate (e.g., 3.0 for 3%)", ge=0)
+    inflation_rate_percent: Optional[float] = Field(2.5, description="Assumed general inflation rate (e.g., 2.5 for 2.5%)", ge=0)
+
+class OperationalParameters(BaseModel):
+    annual_mileage_km: float = Field(..., description="Average annual kilometers driven", gt=0)
+
+class FinancingOptions(BaseModel):
+    financing_method: str = Field("loan", description="Method of vehicle acquisition (cash or loan)")
+    down_payment_percent: float = Field(20.0, description="Down payment percentage for loan financing (e.g., 20.0 for 20%)", ge=0, le=100.0)
+    loan_term_years: int = Field(5, description="Loan term in years", gt=0)
+    loan_interest_rate_percent: float = Field(5.0, description="Annual interest rate for loan (e.g., 5.0 for 5%)", ge=0)
+
+class InfrastructureCosts(BaseModel):
+    """Models costs associated with charging infrastructure."""
+    charger_hardware_costs_aud: Optional[Dict[str, float]] = Field(None, description="Costs for different types of charger hardware (AUD)")
+    selected_charger_cost_aud: float = Field(..., description="Cost of the selected charger hardware (AUD)", ge=0)
+    selected_installation_cost_aud: float = Field(..., description="Cost of installing the selected charger (AUD)", ge=0)
+    charger_maintenance_annual_rate_percent: float = Field(1.0, description="Annual charger maintenance as a percentage of hardware cost (e.g., 1.0 for 1%)", ge=0)
+    charger_lifespan_years: int = Field(10, description="Lifespan of the charger in years", gt=0)
+    # Add other relevant fields if they exist in the dictionary
+    model_config = ConfigDict(extra='allow') # Allow extra fields if dict structure varies
+
+class ElectricityPricePoint(BaseModel):
+    """Represents a single price point, which could be a single value or a range."""
+    price_aud_per_kwh_or_range: Union[float, List[float]] = Field(..., description="Price in AUD/kWh or a [min, max] range")
+
+    @validator('price_aud_per_kwh_or_range')
+    def check_list_length(cls, v):
+        if isinstance(v, list):
+            if len(v) != 2:
+                raise ValueError("Price range list must contain exactly two values [min, max]")
+            if v[0] > v[1]:
+                 raise ValueError("Min price cannot be greater than max price in range")
+        return v
+
+    def get_average_price_aud_per_kwh(self) -> float:
+        """Returns the average price, or the single value if not a range."""
+        if isinstance(self.price_aud_per_kwh_or_range, list):
+            return sum(self.price_aud_per_kwh_or_range) / 2.0
+        return float(self.price_aud_per_kwh_or_range)
+
+class ElectricityPriceScenario(BaseModel):
+    """Represents projected electricity prices for a named scenario."""
+    name: str
+    prices: Dict[int, ElectricityPricePoint] # Year -> PricePoint
+
+class ElectricityPriceProjections(BaseModel):
+    """Container for multiple electricity price scenarios."""
+    scenarios: List[ElectricityPriceScenario]
+    selected_scenario_name: str = Field(..., description="Name of the electricity price scenario to use")
+
+    @model_validator(mode='before')
+    @classmethod
+    def check_selected_scenario_exists(cls, values):
+        scenarios = values.get('scenarios')
+        selected_name = values.get('selected_scenario_name')
+        if scenarios and selected_name:
+            if not any(s.get('name') == selected_name for s in scenarios if isinstance(s, dict)) and \
+               not any(s.name == selected_name for s in scenarios if not isinstance(s, dict)):
+                raise ValueError(f"Selected electricity scenario '{selected_name}' not found in provided scenarios.")
+        return values
+
+class DieselPriceScenarioData(BaseModel):
+    """Represents diesel price data, either a single value or yearly projections."""
+    price_aud_per_l_or_projection: Union[float, Dict[int, float]] = Field(..., description="Constant price (AUD/L) or projection {year: price}")
+
+    def get_price_aud_per_l_for_year(self, year: int, analysis_start_year: int, analysis_period_years: int) -> float:
+        """Gets the diesel price for a specific analysis year using interpolation/extrapolation."""
+        if isinstance(self.price_aud_per_l_or_projection, (int, float)):
+            # Constant price
+            return float(self.price_aud_per_l_or_projection)
+        elif isinstance(self.price_aud_per_l_or_projection, dict):
+            prices = self.price_aud_per_l_or_projection
+            if not prices:
+                raise ValueError("Diesel price projection dictionary cannot be empty.")
+
+            sorted_proj_years = sorted(prices.keys())
+
+            if year in prices:
+                return float(prices[year])
+            elif year < sorted_proj_years[0]:
+                # Extrapolate backwards (use first year's price)
+                return float(prices[sorted_proj_years[0]])
+            elif year > sorted_proj_years[-1]:
+                # Extrapolate forwards (use last year's price)
+                return float(prices[sorted_proj_years[-1]])
+            else:
+                # Interpolate linearly
+                prev_year = max(y for y in sorted_proj_years if y < year)
+                next_year = min(y for y in sorted_proj_years if y > year)
+                prev_price = float(prices[prev_year])
+                next_price = float(prices[next_year])
+
+                if next_year == prev_year: return prev_price # Should not happen
+
+                interpolation_factor = (year - prev_year) / (next_year - prev_year)
+                interpolated_price = prev_price + interpolation_factor * (next_price - prev_price)
+                return interpolated_price
+        else:
+             raise ValueError(f"Invalid diesel price data format: {self.price_aud_per_l_or_projection}")
+
+class DieselPriceScenario(BaseModel):
+    """Represents a named diesel price scenario."""
+    name: str
+    data: DieselPriceScenarioData
+
+class DieselPriceProjections(BaseModel):
+    """Container for multiple diesel price scenarios."""
+    scenarios: List[DieselPriceScenario]
+    selected_scenario_name: str = Field(..., description="Name of the diesel price scenario to use")
+
+    @model_validator(mode='before')
+    @classmethod
+    def check_selected_scenario_exists(cls, values):
+        scenarios = values.get('scenarios')
+        selected_name = values.get('selected_scenario_name')
+        if scenarios and selected_name:
+            if not any(s.get('name') == selected_name for s in scenarios if isinstance(s, dict)) and \
+               not any(s.name == selected_name for s in scenarios if not isinstance(s, dict)):
+                raise ValueError(f"Selected diesel scenario '{selected_name}' not found in provided scenarios.")
+        return values
+
+class MaintenanceDetail(BaseModel):
+    """Detailed maintenance costs for a specific component or schedule."""
+    # Example fields - adjust based on actual dictionary keys used
+    schedule_type: Optional[str] = Field(None, description="e.g., 'annual', 'km_interval'")
+    annual_cost_min_aud: Optional[float] = Field(None, description="Minimum annual cost (AUD)", ge=0)
+    annual_cost_max_aud: Optional[float] = Field(None, description="Maximum annual cost (AUD)", ge=0)
+    cost_aud_per_km: Optional[float] = Field(None, description="Cost per km (AUD/km)", ge=0)
+    service_interval_km: Optional[int] = Field(None, description="Kilometer interval for service", gt=0)
+    # Allow flexibility
+    model_config = ConfigDict(extra='allow')
+
+class MaintenanceCosts(BaseModel):
+    """Container for detailed maintenance costs per vehicle type, keyed by vehicle sub-type."""
+    # Keys should match patterns like 'rigid_bet', 'articulated_diesel' etc.
+    costs_by_type: Dict[str, MaintenanceDetail] = Field(..., description="Detailed maintenance costs keyed by type (e.g., 'rigid_bet'), containing dicts with keys like 'annual_min', 'annual_max'")
+
+class InsuranceRegistrationDetail(BaseModel):
+    """Detailed insurance and registration costs."""
+    # Example fields - adjust based on actual dictionary keys used
+    base_annual_cost_aud: float = Field(..., description="Base annual cost (AUD)", ge=0)
+    cost_type: str = Field("fixed", description="Type of cost ('fixed', 'percentage_of_value')")
+    annual_rate_percent_of_value: Optional[float] = Field(None, description="Annual rate as % of vehicle value (e.g., 1.5 for 1.5%)", ge=0)
+    # Allow flexibility
+    model_config = ConfigDict(extra='allow')
+
+class InsuranceRegistrationCosts(BaseModel):
+    """Container for insurance and registration costs per vehicle type."""
+    electric: InsuranceRegistrationDetail
+    diesel: InsuranceRegistrationDetail
+
+class CarbonTaxConfig(BaseModel):
+    include_carbon_tax: bool = Field(True, description="Include carbon tax in calculations")
+    initial_rate_aud_per_tonne_co2e: float = Field(0.0, description="Initial carbon tax rate (AUD/tonne CO2e)", ge=0)
+    annual_increase_rate_percent: float = Field(0.0, description="Annual increase rate for carbon tax (e.g., 2.0 for 2%)", ge=0)
+
+class RoadUserChargeConfig(BaseModel):
+    include_road_user_charge: bool = Field(True, description="Include road user charge in calculations")
+    initial_charge_aud_per_km: float = Field(0.0, description="Initial road user charge (AUD/km)", ge=0)
+    annual_increase_rate_percent: float = Field(0.0, description="Annual increase rate for road user charge (e.g., 1.0 for 1%)", ge=0)
+
+class GeneralCostIncreaseRates(BaseModel):
+    maintenance_annual_increase_rate_percent: float = Field(0.0, description="Annual increase rate for maintenance costs (e.g., 1.5 for 1.5%)", ge=0)
+    insurance_annual_increase_rate_percent: float = Field(0.0, description="Annual increase rate for insurance costs (e.g., 1.0 for 1%)", ge=0)
+    registration_annual_increase_rate_percent: float = Field(0.0, description="Annual increase rate for registration costs (e.g., 0.5 for 0.5%)", ge=0)
+
+class BatteryReplacementConfig(BaseModel):
+    enable_battery_replacement: bool = Field(True, description="Enable battery replacement logic")
+    annual_degradation_rate_percent: float = Field(2.0, description="Annual battery capacity degradation rate (e.g., 2.0 for 2%)", ge=0, le=100.0)
+    replacement_threshold_fraction: Optional[float] = Field(0.7, description="Capacity threshold (fraction, 0 to 1) to trigger replacement", ge=0, le=1.0)
+    force_replacement_year_index: Optional[int] = Field(None, description="Force battery replacement in this specific year index (0-based)", ge=0)
+
+# --- End Component Models ---
+
+
+class Scenario(BaseModel):
+    """Represents a TCO calculation scenario using composed parameter objects."""
 
     # General
     name: str = Field(default="Default Scenario", description="Unique identifier for the scenario")
     description: Optional[str] = Field(None, description="Optional description")
-    analysis_years: int = Field(..., description="Duration of the analysis in years", gt=0)
-    start_year: int = Field(2025, description="Starting year for the analysis")
+    analysis_period_years: int = Field(..., description="Duration of the analysis in years", gt=0)
+    analysis_start_year: int = Field(datetime.now().year, description="Starting calendar year for the analysis")
 
-    # Economic
-    discount_rate_real: float = Field(..., description="Real annual discount rate (e.g., 0.03 for 3%)", ge=0)
-    inflation_rate: Optional[float] = Field(0.025, description="Assumed general inflation rate for converting real to nominal if needed", ge=0)
+    # Economic Parameters
+    economic_parameters: EconomicParameters
 
-    # Operational
-    annual_mileage: float = Field(..., description="Average annual kilometers driven", gt=0)
+    # Operational Parameters
+    operational_parameters: OperationalParameters
 
-    # Vehicles (Nested models)
+    # Vehicles (Nested models remain)
     electric_vehicle: ElectricVehicle
     diesel_vehicle: DieselVehicle
 
     # Financing Options
-    financing_method: str = Field("loan", description="Method of vehicle acquisition (cash or loan)")
-    down_payment_pct: float = Field(0.2, description="Down payment percentage for loan financing", ge=0, le=1.0)
-    loan_term: int = Field(5, description="Loan term in years", gt=0)
-    interest_rate: float = Field(0.05, description="Annual interest rate for loan", ge=0)
+    financing_options: FinancingOptions
 
-    # Infrastructure (EV Specific) - Now a nested structure
-    # charger_cost: float = Field(0.0, description="Upfront charger cost (AUD)", ge=0)
-    # charger_installation_cost: float = Field(0.0, description="Upfront charger installation cost (AUD)", ge=0)
-    # charger_maintenance_percent: float = Field(0.01, description="Annual charger maintenance as a percentage of upfront cost", ge=0)
-    # charger_lifespan: int = Field(10, description="Lifespan of the charger in years", gt=0)
-    infrastructure_costs: Dict[str, Union[float, int, Dict[str, float]]] = Field(..., description="Dictionary containing infrastructure costs like charger hardware, installation, maintenance percentage")
+    # Infrastructure (EV Specific)
+    infrastructure_costs: InfrastructureCosts
 
-    # --- Base Prices / Rates (Year 0) --- (Kept for potential overrides or simple scenarios)
-    electricity_price_base: Optional[float] = Field(None, description="Optional: Base electricity price (AUD/kWh) for year 0 if not using projections", ge=0)
-    diesel_price_base: Optional[float] = Field(None, description="Optional: Base diesel price (AUD/L) for year 0 if not using projections", ge=0)
+    # --- Base Prices / Rates (Year 0) --- (Keep for potential overrides or simple scenarios)
+    base_electricity_price_aud_per_kwh: Optional[float] = Field(None, description="Optional: Base electricity price (AUD/kWh) for start year if not using projections", ge=0)
+    base_diesel_price_aud_per_l: Optional[float] = Field(None, description="Optional: Base diesel price (AUD/L) for start year if not using projections", ge=0)
 
-    # --- Price Projections / Scenarios --- (Primary source based on updated_data)
-    electricity_price_projections: Dict[str, Dict[int, Union[float, List[float]]]] = Field(..., description="Projected electricity prices (AUD/kWh) under different scenarios (e.g., average_flat_rate, off_peak_tou)")
-    diesel_price_scenarios: Dict[str, Union[float, Dict[int, float]]] = Field(..., description="Diesel price scenarios (AUD/L) (e.g., baseline_2025, low_stable, medium_increase)")
-    selected_electricity_scenario: str = Field(..., description="Name of the electricity price scenario to use from projections")
-    selected_diesel_scenario: str = Field(..., description="Name of the diesel price scenario to use")
+    # --- Price Projections / Scenarios ---
+    electricity_price_projections: Optional[ElectricityPriceProjections] = Field(None, description="Electricity price projections")
+    diesel_price_projections: Optional[DieselPriceProjections] = Field(None, description="Diesel price projections")
 
-    # --- Detailed Maintenance Costs --- (Replaces simple per/km)
-    maintenance_costs_detailed: Dict[str, Dict[str, Union[float, str]]] = Field(..., description="Detailed maintenance costs (e.g., annual min/max) per vehicle type")
+    # --- Detailed Costs ---
+    maintenance_costs_detailed: Dict[str, Dict[str, Any]] = Field(..., description="Detailed maintenance costs keyed by type (e.g., 'rigid_bet'), containing dicts with keys like 'annual_min', 'annual_max'")
+    insurance_registration_costs: InsuranceRegistrationCosts
 
-    # --- Insurance and Registration --- (Replaces factors)
-    insurance_and_registration: Dict[str, Dict[str, Union[float, int, str]]] = Field(..., description="Insurance and registration costs per vehicle type")
+    # --- Other Costs / Taxes ---
+    carbon_tax_config: CarbonTaxConfig
+    road_user_charge_config: RoadUserChargeConfig
 
-    # --- Carbon Tax --- (Keep base + rate)
-    carbon_tax_rate: float = Field(0.0, description="Initial carbon tax rate (AUD/tonne CO2e)", ge=0)
-    carbon_tax_increase_rate: float = Field(0.0, description="Annual increase rate for carbon tax", ge=0)
-
-    # --- Road User Charge --- (Keep base + rate)
-    road_user_charge: float = Field(0.0, description="Initial road user charge (AUD/km)", ge=0)
-    road_user_charge_increase_rate: float = Field(0.0, description="Annual increase rate for road user charge", ge=0)
-
-    # --- Removed deprecated cost fields --- 
-    # electric_maintenance_cost_per_km: float = Field(..., description="Base maintenance cost for electric vehicles (AUD/km)", ge=0)
-    # diesel_maintenance_cost_per_km: float = Field(..., description="Base maintenance cost for diesel vehicles (AUD/km)", ge=0)
-    # insurance_base_rate: float = Field(0.03, description="Base annual insurance rate as a fraction of purchase price", ge=0)
-    # electric_insurance_cost_factor: float = Field(1.0, description="Multiplier factor for EV insurance cost relative to base rate", ge=0)
-    # diesel_insurance_cost_factor: float = Field(1.0, description="Multiplier factor for Diesel insurance cost relative to base rate", ge=0)
-    # annual_registration_cost: float = Field(..., description="Base annual registration cost (AUD)", ge=0)
-
-    # --- Removed price increase rates - now handled by projections/scenarios --- 
-    # electricity_price_increase: float = Field(0.0, description="Annual increase rate for electricity price", ge=0)
-    # diesel_price_increase: float = Field(0.0, description="Annual increase rate for diesel price", ge=0)
-
-    # --- Keep general cost increase rates for items NOT covered by specific projections --- 
-    maintenance_increase_rate: float = Field(0.0, description="Annual increase rate for maintenance costs (applied to detailed costs)", ge=0)
-    insurance_increase_rate: float = Field(0.0, description="Annual increase rate for insurance costs", ge=0)
-    registration_increase_rate: float = Field(0.0, description="Annual increase rate for registration costs", ge=0)
+    # --- General Cost Increase Rates ---
+    general_cost_increase_rates: GeneralCostIncreaseRates
 
     # --- Flags / Options ---
-    include_carbon_tax: bool = Field(True, description="Include carbon tax in calculations for applicable vehicles")
-    include_road_user_charge: bool = Field(True, description="Include road user charge in calculations")
-    enable_battery_replacement: bool = Field(True, description="Enable battery replacement logic")
+    # Flags moved into specific config objects (CarbonTaxConfig, RoadUserChargeConfig, BatteryReplacementConfig)
 
     # Battery Replacement (EV Specific)
-    battery_degradation_rate: float = Field(0.02, description="Annual battery capacity degradation rate (used for replacement logic)", ge=0, le=1.0)
-    # Threshold at which capacity triggers replacement, if force_battery_replacement_year is not set.
-    # Example: 0.7 means replacement happens when capacity drops to 70% or below.
-    battery_replacement_threshold: Optional[float] = Field(0.7, description="Capacity threshold (fraction) to trigger battery replacement", ge=0, le=1.0)
-    force_battery_replacement_year: Optional[int] = Field(None, description="Force battery replacement in this specific year (1-based index, e.g., 8 for year 8)", ge=1)
+    battery_replacement_config: BatteryReplacementConfig
 
-    # Battery pack cost projections moved to ElectricVehicle model
-    # battery_cost_projections: Optional[Dict[int, float]] = Field(None, description="Optional override for battery cost projections (Year: AUD/kWh)")
+    # Optional: Field for explicitly provided battery cost projections (overrides default loading)
+    battery_pack_cost_aud_per_kwh_projections: Optional[Dict[int, float]] = Field(None, description="Optional: Explicit battery pack cost projections (AUD/kWh by year)")
 
-    # Internal cache for calculated annual prices. Handled by Pydantic/PrivateAttr.
-    _generated_prices: Dict[str, List[float]] = PrivateAttr(default_factory=dict)
-    # Optional: Cache for battery costs loaded from external file could be added here if needed Scenario-wide
-    # _battery_costs_lookup: Dict[int, float] = PrivateAttr(default_factory=dict)
-
-    # --- Add missing fields previously handled by kwargs or assumed --- 
-    # These should match fields expected by components, but might not be directly on Scenario
-    # if they are better suited to be on Vehicle. Check component logic.
-    # Example (these were previously assumed or passed via kwargs in tests):
-    # battery_cost_projections: Optional[Dict[int, float]] = Field(None, description="Optional override for battery cost projections (Year: AUD/kWh)")
+    # --- Internal State ---
+    _generated_prices_cache: Dict[str, List[float]] = PrivateAttr(default_factory=dict)
 
     # Use ConfigDict for Pydantic v2 configuration
     model_config = ConfigDict(
-        arbitrary_types_allowed=True
+        arbitrary_types_allowed=True,
+        validate_assignment=True
     )
-    
-    # Add computed property for end_year
+
+    # --- Computed Properties & Validators ---
     @property
-    def end_year(self) -> int:
+    def analysis_end_year(self) -> int:
         """Calculate the end year from start_year and analysis_years."""
-        return self.start_year + self.analysis_years - 1
+        return self.analysis_start_year + self.analysis_period_years - 1
+
+    @property
+    def analysis_calendar_years(self) -> List[int]:
+        """Returns the list of calendar years in the analysis period."""
+        return list(range(self.analysis_start_year, self.analysis_start_year + self.analysis_period_years))
 
     @model_validator(mode='after')
-    def _calculate_annual_prices(self) -> 'Scenario':
+    def _calculate_and_cache_annual_prices(self) -> 'Scenario':
         """Generate annual price series for relevant costs after model initialization.
            Uses selected projections/scenarios for energy, and base+increase for others.
+           Caches the results in _generated_prices_cache.
         """
-        self._generated_prices = {} # Ensure cache is cleared before recalculation
+        if not hasattr(self, '_generated_prices_cache'):
+             self._generated_prices_cache = {}
+        self._generated_prices_cache.clear()
 
-        # 1. Carbon Tax and Road User Charge (Base + Increase Rate)
-        prices_to_generate_simple = {
-            'carbon_tax': (self.carbon_tax_rate, self.carbon_tax_increase_rate),
-            'road_user_charge': (self.road_user_charge, self.road_user_charge_increase_rate)
-        }
-        for name, (base_price, increase_rate) in prices_to_generate_simple.items():
-            self._generated_prices[name] = [
-                base_price * ((1 + increase_rate) ** i) for i in range(self.analysis_years)
-            ]
+        years = self.analysis_period_years
+        start_year = self.analysis_start_year
 
-        # 2. Electricity Prices (from selected projection scenario)
-        if self.selected_electricity_scenario not in self.electricity_price_projections:
-            raise ValueError(f"Selected electricity scenario '{self.selected_electricity_scenario}' not found in projections.")
-        elec_proj = self.electricity_price_projections[self.selected_electricity_scenario]
+        # 1. Carbon Tax and Road User Charge (from config objects)
+        ct_base = self.carbon_tax_config.initial_rate_aud_per_tonne_co2e
+        ct_inc = self.carbon_tax_config.annual_increase_rate_percent / 100.0
+        ruc_base = self.road_user_charge_config.initial_charge_aud_per_km
+        ruc_inc = self.road_user_charge_config.annual_increase_rate_percent / 100.0
+
+        self._generated_prices_cache['carbon_tax_rate_aud_per_tonne'] = [ct_base * ((1 + ct_inc) ** i) for i in range(years)]
+        self._generated_prices_cache['road_user_charge_aud_per_km'] = [ruc_base * ((1 + ruc_inc) ** i) for i in range(years)]
+
+        # 2. Electricity Prices (from projections or base)
         elec_prices = []
-        years_available = sorted(elec_proj.keys())
-        for i in range(self.analysis_years):
-            current_year = self.start_year + i
-            # Find the closest available year <= current_year
-            proj_year = max((y for y in years_available if y <= current_year), default=years_available[0])
-            price_data = elec_proj[proj_year]
-            # Handle range [min, max] vs single value - Use average for now
-            if isinstance(price_data, list) and len(price_data) == 2:
-                elec_prices.append(sum(price_data) / 2.0)
-            elif isinstance(price_data, (int, float)):
-                elec_prices.append(float(price_data))
+        if self.electricity_price_projections:
+            selected_scen_name = self.electricity_price_projections.selected_scenario_name
+            selected_scen = next((s for s in self.electricity_price_projections.scenarios if s.name == selected_scen_name), None)
+            if selected_scen:
+                 proj_prices = selected_scen.prices # Dict[int, ElectricityPricePoint]
+                 sorted_proj_years = sorted(proj_prices.keys())
+
+                 for i in range(years):
+                     current_year = start_year + i
+                     if current_year in proj_prices:
+                         elec_prices.append(proj_prices[current_year].get_average_price_aud_per_kwh())
+                     elif current_year < sorted_proj_years[0]:
+                          elec_prices.append(proj_prices[sorted_proj_years[0]].get_average_price_aud_per_kwh()) # Extrapolate back
+                     elif current_year > sorted_proj_years[-1]:
+                          elec_prices.append(proj_prices[sorted_proj_years[-1]].get_average_price_aud_per_kwh()) # Extrapolate forward
+                     else:
+                         # Interpolate
+                         prev_year = max(y for y in sorted_proj_years if y < current_year)
+                         next_year = min(y for y in sorted_proj_years if y > current_year)
+                         prev_price = proj_prices[prev_year].get_average_price_aud_per_kwh()
+                         next_price = proj_prices[next_year].get_average_price_aud_per_kwh()
+                         interpolation_factor = (current_year - prev_year) / (next_year - prev_year)
+                         interpolated_price = prev_price + interpolation_factor * (next_price - prev_price)
+                         elec_prices.append(interpolated_price)
             else:
-                 raise ValueError(f"Invalid price data format for year {proj_year} in electricity scenario '{self.selected_electricity_scenario}': {price_data}")
-        self._generated_prices['electricity'] = elec_prices
+                 logger.warning(f"Selected electricity scenario '{selected_scen_name}' not found during price generation. Using base price if available.")
+                 if self.base_electricity_price_aud_per_kwh is not None:
+                     elec_prices = [self.base_electricity_price_aud_per_kwh] * years
+                 else:
+                      raise ValueError("Electricity prices are required (either projections or base price).")
 
-        # 3. Diesel Prices (from selected projection scenario)
-        if self.selected_diesel_scenario not in self.diesel_price_scenarios:
-            raise ValueError(f"Selected diesel scenario '{self.selected_diesel_scenario}' not found in projections.")
-        diesel_proj_data = self.diesel_price_scenarios[self.selected_diesel_scenario]
-        diesel_prices = []
-        # Handle different structures: could be a single baseline or yearly projections
-        if isinstance(diesel_proj_data, dict): # Yearly projections
-            diesel_proj = diesel_proj_data
-            years_available = sorted(diesel_proj.keys())
-            for i in range(self.analysis_years):
-                current_year = self.start_year + i
-                proj_year = max((y for y in years_available if y <= current_year), default=years_available[0])
-                diesel_prices.append(float(diesel_proj[proj_year]))
-        elif isinstance(diesel_proj_data, (int, float)): # Single baseline value (e.g., baseline_2025)
-             # Assume constant if only one value provided for the scenario name
-             # A better approach might be to require yearly structure even for flat scenarios.
-             # For now, assume constant.
-             base_price = float(diesel_proj_data)
-             # Could optionally apply diesel_price_increase if defined, but projections should ideally cover this.
-             # Let's stick to the projection value.
-             diesel_prices = [base_price] * self.analysis_years
+        elif self.base_electricity_price_aud_per_kwh is not None:
+            elec_prices = [self.base_electricity_price_aud_per_kwh] * years # Assume constant base price if no projections
         else:
-            raise ValueError(f"Invalid data format for diesel scenario '{self.selected_diesel_scenario}': {diesel_proj_data}")
-        self._generated_prices['diesel'] = diesel_prices
+             raise ValueError("Electricity prices are required (either projections or base price).")
 
-        # Note: Other costs like maintenance, insurance, registration are handled directly
-        # by components using the detailed dictionaries and applying their increase rates annually.
-        # They don't need a pre-generated price list in _generated_prices here.
+        self._generated_prices_cache['electricity_price_aud_per_kwh'] = elec_prices
 
-        logger.debug(f"Generated annual price series for scenario '{self.name}'.")
+
+        # 3. Diesel Prices (from projections or base)
+        diesel_prices = []
+        if self.diesel_price_projections:
+            selected_scen_name = self.diesel_price_projections.selected_scenario_name
+            selected_scen = next((s for s in self.diesel_price_projections.scenarios if s.name == selected_scen_name), None)
+            if selected_scen:
+                 for i in range(years):
+                      current_year = start_year + i
+                      diesel_prices.append(selected_scen.data.get_price_aud_per_l_for_year(current_year, start_year, years))
+            else:
+                 logger.warning(f"Selected diesel scenario '{selected_scen_name}' not found during price generation. Using base price if available.")
+                 if self.base_diesel_price_aud_per_l is not None:
+                     diesel_prices = [self.base_diesel_price_aud_per_l] * years
+                 else:
+                      raise ValueError("Diesel prices are required (either projections or base price).")
+
+        elif self.base_diesel_price_aud_per_l is not None:
+             diesel_prices = [self.base_diesel_price_aud_per_l] * years # Assume constant base price
+        else:
+             raise ValueError("Diesel prices are required (either projections or base price).")
+
+        self._generated_prices_cache['diesel_price_aud_per_l'] = diesel_prices
+
+        # 4. General Cost Increase Rates (applied within components where needed)
+        # These are stored in `general_cost_increase_rates` and accessed directly.
+
+        logger.debug(f"Generated and cached annual prices for scenario '{self.name}'.")
         return self
 
-    # Method for cost components to access prices easily
-    def get_annual_price(self, cost_type: str, year_index: int) -> Optional[float]:
-        """Retrieve the calculated price for a specific cost type and year index (0-based).
+    def get_annual_price(self, cost_type_key: str, calculation_year_index: int) -> Optional[float]:
+        """Retrieve a pre-calculated annual price for a given cost type and year index.
 
         Args:
-            cost_type: The type of cost (e.g., 'electricity', 'diesel', 'carbon_tax').
-            year_index: The 0-based index of the analysis year (0 to analysis_years - 1).
+            cost_type_key: The key for the cost type (e.g., 'electricity_price_aud_per_kwh', 'diesel_price_aud_per_l',
+                           'carbon_tax_rate_aud_per_tonne', 'road_user_charge_aud_per_km').
+            calculation_year_index: The 0-based index of the calculation year within the analysis period.
 
         Returns:
-            The calculated price for that year, or None if not found.
+            The calculated price for that year, or None if the index is invalid or key not found.
         """
-        if cost_type in self._generated_prices:
-            price_series = self._generated_prices[cost_type]
-            if 0 <= year_index < len(price_series):
-                return price_series[year_index]
-            else:
-                logger.warning(f"Year index {year_index} out of bounds for {cost_type} price series (Length: {len(price_series)}). Scenario: '{self.name}'")
-        else:
-            logger.warning(f"Cost type '{cost_type}' not found in generated price series for scenario '{self.name}'. Available: {list(self._generated_prices.keys())}")
-        return None
+        if calculation_year_index < 0 or calculation_year_index >= self.analysis_period_years:
+            logger.error(f"Invalid year index {calculation_year_index} requested for scenario '{self.name}'.")
+            return None
 
-    # Use field_validator for Pydantic v2
-    @field_validator('force_battery_replacement_year')
+        if not self._generated_prices_cache:
+             logger.warning(f"Price cache was empty for scenario '{self.name}'. Recalculating...")
+             self._calculate_and_cache_annual_prices()
+
+        price_series = self._generated_prices_cache.get(cost_type_key)
+
+        if price_series is None:
+            logger.error(f"Price series for key '{cost_type_key}' not found in scenario '{self.name}' cache.")
+            return None # Or raise error?
+
+        if calculation_year_index >= len(price_series):
+             logger.error(f"Year index {calculation_year_index} out of bounds for cached price series '{cost_type_key}' (length {len(price_series)}).")
+             return None # Or raise error?
+
+        return price_series[calculation_year_index]
+
+    @field_validator('battery_replacement_config')
     @classmethod
-    def check_replacement_year_bounds(cls, v: Optional[int], info: ValidationInfo):
-        """Ensure forced replacement year is within analysis period."""
-        # 'values' is deprecated, use info.data
-        if v is not None and 'analysis_years' in info.data and info.data['analysis_years'] is not None:
-            if v > info.data['analysis_years']:
-                raise ValueError(f"force_battery_replacement_year ({v}) cannot be greater than analysis_years ({info.data['analysis_years']})")
+    def check_replacement_year_bounds(cls, v: BatteryReplacementConfig, info: ValidationInfo):
+        """Validate that force_replacement_year_index is within the analysis period if set."""
+        if v.force_replacement_year_index is not None and 'analysis_period_years' in info.data:
+             analysis_years = info.data['analysis_period_years']
+             if v.force_replacement_year_index >= analysis_years:
+                 raise ValueError(f"force_replacement_year_index ({v.force_replacement_year_index}) "
+                                  f"must be less than analysis_period_years ({analysis_years}). Note: 0-based index.")
+        # Can add more validation for the threshold vs degradation if needed
         return v
 
     @classmethod
     def from_file(cls, filepath: str) -> 'Scenario':
-        """Load scenario from a YAML file, handling nested vehicle objects."""
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"Scenario file not found: {filepath}")
+        """Load a scenario from a YAML file."""
         logger.info(f"Loading scenario from: {filepath}")
-        with open(filepath, 'r') as f:
-            try:
-                data = yaml.safe_load(f)
-                if data is None:
-                    raise ValueError(f"Scenario file is empty or invalid: {filepath}")
-            except yaml.YAMLError as e:
-                logger.error(f"Error parsing YAML file {filepath}: {e}")
-                raise ValueError(f"Error parsing YAML file {filepath}: {e}")
-
+        if not os.path.exists(filepath):
+            logger.error(f"Scenario file not found: {filepath}")
+            raise FileNotFoundError(f"Scenario file not found: {filepath}")
         try:
-            # Pydantic v2 automatically handles nested models if the structure matches
-            # No need to manually instantiate unless structure is different.
-            instance = cls(**data)
-            logger.info(f"Successfully loaded and validated scenario: {instance.name}")
-            return instance
-        except Exception as e:
-            # Log the detailed validation error
-            logger.error(f"Error validating data from {filepath}: {e}", exc_info=True)
-            # Re-raise a more informative error
-            raise ValueError(f"Error validating scenario data from {filepath}. Check structure and types. Details: {e}")
+            with open(filepath, 'r') as f:
+                data = yaml.safe_load(f)
+            if data is None:
+                 raise ValueError(f"YAML file is empty or invalid: {filepath}")
+            scenario = cls(**data)
+            logger.info(f"Successfully loaded scenario: {scenario.name}")
+            return scenario
+        except yaml.YAMLError as e:
+            logger.error(f"Error parsing scenario YAML file {filepath}: {e}", exc_info=True)
+            raise ValueError(f"Error parsing scenario YAML file: {e}") from e
+        except Exception as e: # Catch Pydantic validation errors and others
+            logger.error(f"Error creating Scenario object from file {filepath}: {e}", exc_info=True)
+            raise ValueError(f"Error creating Scenario object from file: {e}") from e
 
     def to_file(self, filepath: str) -> None:
-        """Save scenario to a YAML file, handling nested models."""
+        """Save the current scenario configuration to a YAML file."""
         logger.info(f"Saving scenario '{self.name}' to: {filepath}")
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
-        # model_dump with mode='json' handles nested Pydantic models correctly for YAML serialization
-        data = self.model_dump(mode='json', exclude_none=True) # exclude_none for cleaner output
         try:
+            data_to_save = self.model_dump(exclude={'_generated_prices_cache'})
+
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
             with open(filepath, 'w') as f:
-                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-            logger.info(f"Scenario '{self.name}' saved successfully.")
+                yaml.dump(data_to_save, f, sort_keys=False, default_flow_style=False)
+            logger.info(f"Successfully saved scenario '{self.name}'.")
         except Exception as e:
-            logger.error(f"Failed to save scenario to {filepath}: {e}", exc_info=True)
-            raise # Re-raise the exception after logging
+            logger.error(f"Error saving scenario '{self.name}' to file {filepath}: {e}", exc_info=True)
+            raise IOError(f"Failed to save scenario to {filepath}") from e
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert scenario to a dictionary, including nested models."""
-        return self.model_dump(mode='json')
+        """Convert the scenario model to a dictionary (excluding internal state)."""
+        return self.model_dump(exclude={'_generated_prices_cache'})
 
     def with_modifications(self, **kwargs) -> 'Scenario':
-        """Create a new Scenario instance with updated parameters.
+        """Creates a new Scenario instance with specified modifications."""
+        current_data = self.model_dump(exclude={'_generated_prices_cache'})
 
-        Handles updates to top-level fields and nested vehicle dictionaries.
-        Ensures the new instance is validated and price series are regenerated.
-
-        Args:
-            **kwargs: Keyword arguments of parameters to update.
-
-        Returns:
-            A new Scenario instance with the modifications applied.
-
-        Raises:
-            ValueError: If modifications can't be applied.
-        """
-        # Use Pydantic's recommended way for creating a modified copy
         try:
-            # Create a new instance with updated fields
-            new_instance = self.model_copy(update=kwargs)
-            
-            # Explicitly ensure price series are regenerated if price-related parameters are changed
-            # This is needed because while model_copy runs model_validator for basic validation,
-            # it might not fully regenerate all derived values like price series with the new parameters
-            price_related_params = {
-                'selected_electricity_scenario', 'selected_diesel_scenario',
-                'carbon_tax_rate', 'carbon_tax_increase_rate',
-                'road_user_charge', 'road_user_charge_increase_rate'
-            }
-            
-            # If any price-related parameter was modified, explicitly recalculate prices
-            # This ensures that the price series in _generated_prices are consistent with the new parameters
-            if any(param in kwargs for param in price_related_params):
-                new_instance._calculate_annual_prices()
-                
-            logger.debug(f"Created modified scenario based on '{self.name}'. Updates: {kwargs}")
-            return new_instance
+             updated_scenario = self.model_copy(update=kwargs, deep=True)
+             logger.info(f"Created modified scenario based on '{self.name}'.")
+             return updated_scenario
         except Exception as e:
-             logger.error(f"Error creating modified scenario: {e}. Updates provided: {kwargs}", exc_info=True)
-             raise ValueError(f"Failed to apply modifications: {e}")
+             logger.error(f"Failed to create modified scenario: {e}", exc_info=True)
+             raise ValueError(f"Failed to apply modifications: {e}") from e
 
 
-# Example Usage (Optional - for testing or demonstration)
+def load_scenario_from_config(config_path: str) -> Scenario:
+    """Loads the TCO calculation scenario from a YAML configuration file."""
+    return Scenario.from_file(config_path)
+
+def save_scenario_to_config(scenario: Scenario, config_path: str) -> None:
+    """Saves the TCO calculation scenario to a YAML configuration file."""
+    scenario.to_file(config_path)
+
+
 if __name__ == '__main__':
-    # Define some vehicle instances (assuming ElectricVehicle/DieselVehicle classes are defined)
-    ev = ElectricVehicle(
-        name="Sample EV", purchase_price=50000, residual_value_percent=0.4, energy_consumption=0.2,
-        maintenance_cost_per_km=0.05, insurance_cost_percent=0.03, registration_cost=300,
-        battery_capacity_kwh=60, battery_replacement_cost_per_kwh=120, battery_cycle_life=1800,
-        battery_depth_of_discharge=0.8, charging_efficiency=0.9
-    )
-    dv = DieselVehicle(
-        name="Sample Diesel", purchase_price=40000, residual_value_percent=0.3, energy_consumption=0.08,
-        maintenance_cost_per_km=0.07, insurance_cost_percent=0.035, registration_cost=500,
-        co2_emission_factor=2.68
-    )
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    # Create a scenario instance
-    try:
-        scenario_data = {
-            "name": "Test Scenario",
-            "analysis_years": 10,
-            "discount_rate_real": 0.05,
-            "annual_mileage": 20000,
-            "electric_vehicle": ev.model_dump(), # Pass as dict for Pydantic init
-            "diesel_vehicle": dv.model_dump(),
-            "infrastructure_cost": 3000,
-            "electricity_price_base": 0.22,
-            "diesel_price_base": 1.80,
-            "carbon_tax_rate": 25,
-            "road_user_charge": 0.03,
-            "selected_electricity_scenario": "average_flat_rate",
-            "selected_diesel_scenario": "baseline_2025",
-            "maintenance_increase_rate": 0.01,
-            "insurance_increase_rate": 0.01,
-            "registration_increase_rate": 0.01,
-        }
-        test_scenario = Scenario(**scenario_data)
+    EXAMPLE_YAML = 'config/scenario_example.yaml'
 
-        print("Scenario created successfully:", test_scenario.name)
-        print("EV Price Year 0:", test_scenario.get_annual_price('electricity', 0))
-        print("EV Price Year 5:", test_scenario.get_annual_price('electricity', 5))
-        print("Diesel Price Year 9:", test_scenario.get_annual_price('diesel', 9))
-        print("Carbon Tax Year 2:", test_scenario.get_annual_price('carbon_tax', 2))
+    if os.path.exists(EXAMPLE_YAML):
+        try:
+            scenario = Scenario.from_file(EXAMPLE_YAML)
+            print(f"\nLoaded Scenario: {scenario.name}")
+            print(f"Analysis Period: {scenario.analysis_period_years} years")
+            print(f"Start Year: {scenario.analysis_start_year}")
+            print(f"Discount Rate: {scenario.economic_parameters.discount_rate_percent_real}%")
+            print(f"EV Name: {scenario.electric_vehicle.name}")
+            print(f"Diesel Name: {scenario.diesel_vehicle.name}")
 
-        # Test modification
-        modified_scenario = test_scenario.with_modifications(annual_mileage=25000, electricity_price_base=0.25)
-        print("\nModified Scenario:")
-        print("New Mileage:", modified_scenario.annual_mileage)
-        print("New EV Price Year 0:", modified_scenario.get_annual_price('electricity', 0))
+            print("\nGenerated Prices (Year 0):")
+            print(f"  Electricity: {scenario.get_annual_price('electricity_price_aud_per_kwh', 0):.4f} AUD/kWh")
+            print(f"  Diesel: {scenario.get_annual_price('diesel_price_aud_per_l', 0):.4f} AUD/L")
+            print(f"  Carbon Tax: {scenario.get_annual_price('carbon_tax_rate_aud_per_tonne', 0):.2f} AUD/tonne")
+            print(f"  Road User Charge: {scenario.get_annual_price('road_user_charge_aud_per_km', 0):.4f} AUD/km")
 
-        # Test file operations (create a dummy directory)
-        test_dir = "_test_scenario_output"
-        os.makedirs(test_dir, exist_ok=True)
-        file_path = os.path.join(test_dir, "test_scenario.yaml")
-        modified_scenario.to_file(file_path)
-        print(f"\nSaved modified scenario to {file_path}")
+            modified_scenario = scenario.with_modifications(
+                name="Modified Example Scenario",
+                economic_parameters={'discount_rate_percent_real': 4.5}
+            )
+            print(f"\nModified Scenario Discount Rate: {modified_scenario.economic_parameters.discount_rate_percent_real}%")
 
-        loaded_scenario = Scenario.from_file(file_path)
-        print(f"Loaded scenario '{loaded_scenario.name}' successfully from file.")
-        print("Loaded Mileage:", loaded_scenario.annual_mileage)
-        print("Loaded EV Name:", loaded_scenario.electric_vehicle.name)
+            output_dir = 'output'
+            os.makedirs(output_dir, exist_ok=True)
+            save_path = os.path.join(output_dir, 'modified_scenario_example.yaml')
+            modified_scenario.to_file(save_path)
+            print(f"Saved modified scenario to: {save_path}")
 
-        # Clean up dummy file/dir
-        # import shutil
-        # shutil.rmtree(test_dir)
-        # print("Cleaned up test directory.")
+        except (FileNotFoundError, ValueError, IOError) as e:
+            print(f"\nError processing scenario: {e}")
+        except Exception as e:
+            print(f"\nAn unexpected error occurred: {e}")
+            import traceback
+            traceback.print_exc()
 
-    except Exception as e:
-        print(f"\nError during example usage: {e}")
-        import traceback
-        traceback.print_exc()
+    else:
+        print(f"\nExample YAML file not found at '{EXAMPLE_YAML}'. Cannot run example.")

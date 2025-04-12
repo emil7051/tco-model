@@ -40,12 +40,12 @@ class TabLayoutManager:
         """
         self.tabs.append((label, widgets))
     
-    def render(self, params: Dict[str, Any]) -> None:
+    def render(self, results: Dict[str, Any]) -> None:
         """
         Render the tabbed interface.
         
         Args:
-            params: Parameters to pass to each widget's render method
+            results: Results dictionary to pass to each widget's render method
         """
         if self.title:
             st.header(self.title)
@@ -61,7 +61,7 @@ class TabLayoutManager:
         for i, (_, widgets) in enumerate(self.tabs):
             with tab_objects[i]:
                 for widget in widgets:
-                    widget.render(params)
+                    widget.render(results)
 
 
 class AccordionLayoutManager:
@@ -93,12 +93,12 @@ class AccordionLayoutManager:
         """
         self.sections.append((label, widgets, expanded))
     
-    def render(self, params: Dict[str, Any]) -> None:
+    def render(self, results: Dict[str, Any]) -> None:
         """
         Render the accordion interface.
         
         Args:
-            params: Parameters to pass to each widget's render method
+            results: Results dictionary to pass to each widget's render method
         """
         if self.title:
             st.header(self.title)
@@ -111,4 +111,4 @@ class AccordionLayoutManager:
         for label, widgets, expanded in self.sections:
             with st.expander(label, expanded=expanded):
                 for widget in widgets:
-                    widget.render(params) 
+                    widget.render(results) 

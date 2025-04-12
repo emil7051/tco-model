@@ -1,66 +1,130 @@
-name: "Long Haul Default"
-description: "Default scenario for a long-haul truck comparison in Australian conditions."
-analysis_years: 15 # e.g., 2025 to 2039 inclusive
+name: "Long Haul Default - Refactored"
+description: "Default scenario for a long-haul truck comparison, refactored structure."
+analysis_period_years: 15
+analysis_start_year: 2025 # Added default start year
 
-# Economic
-discount_rate_real: 0.05 # Example real discount rate
+# --- Economic Parameters ---
+economic_parameters:
+  discount_rate_percent_real: 5.0 # Scaled (0.05 -> 5.0)
+  inflation_rate_percent: 2.5 # Added default
 
-# Operational
-annual_mileage: 150000 # km/year - Higher mileage for long-haul
-electric_maintenance_cost_per_km: 0.08 # AUD/km
-diesel_maintenance_cost_per_km: 0.15 # AUD/km
-annual_registration_cost: 6000 # AUD/year (base year)
+# --- Operational Parameters ---
+operational_parameters:
+  annual_mileage_km: 150000 # Renamed
 
-# Electric Vehicle
+# --- Financing Options --- # Added default structure
+financing_options:
+  financing_method: loan
+  down_payment_percent: 20.0
+  loan_term_years: 7 # Default adjusted for higher cost vehicle
+  loan_interest_rate_percent: 6.0 # Default
+
+# --- Vehicle Definitions ---
 electric_vehicle:
   name: "Long Haul EV (Default)"
-  purchase_price: 550000 # AUD - Higher cost for long-haul BEV
-  residual_value_percent: 0.12 # Proportion of purchase price after analysis_years
-  energy_consumption_kwh_per_km: 1.2 # kWh/km - Higher consumption for heavier vehicle
-  maintenance_cost_per_km: 0.08 # AUD/km (base year)
-  insurance_cost_percent: 0.025 # % of purchase price (base year)
-  registration_cost: 6000 # AUD/year (base year)
-  battery_capacity_kwh: 600 # kWh - Larger battery for long-haul
-  battery_replacement_cost_per_kwh: 140 # AUD/kWh
-  battery_cycle_life: 2000 # Cycles
-  battery_depth_of_discharge: 0.85 # DoD
-  charging_efficiency: 0.92 # Grid-to-battery efficiency
+  vehicle_type: articulated # Assumed type
+  base_purchase_price_aud: 550000 # Renamed
+  lifespan_years: 15 # Explicit lifespan
+  residual_value_percent_projections: # Renamed and structured
+    15: 0.12 # Used residual_value_percent at analysis_years
+  base_registration_cost_aud: 6000 # Renamed (used top-level annual_registration_cost)
+  # purchase_price_annual_decrease_rate_real: 0.0 # Add if needed
+  # Battery Details
+  battery_capacity_kwh: 600
+  energy_consumption_kwh_per_km: 1.2
+  battery_warranty_years: 8 # Added default
+  battery_pack_cost_aud_per_kwh_projections: # Added placeholder projections
+    2025: 170
+    2030: 100
+    2035: 75
+    2040: 60
+  battery_cycle_life: 2000
+  battery_depth_of_discharge_percent: 85.0 # Renamed & Scaled (0.85 -> 85.0)
+  charging_efficiency_percent: 92.0 # Renamed & Scaled (0.92 -> 92.0)
 
-# Diesel Vehicle
 diesel_vehicle:
   name: "Long Haul Diesel (Default)"
-  purchase_price: 350000 # AUD
-  residual_value_percent: 0.10 # Proportion of purchase price after analysis_years
-  fuel_consumption_l_per_100km: 36.0 # L/100km - Higher fuel consumption for long-haul
-  maintenance_cost_per_km: 0.15 # AUD/km (base year)
-  insurance_cost_percent: 0.03 # % of purchase price (base year)
-  registration_cost: 6000 # AUD/year (base year)
-  co2_emission_factor: 2.68 # kg CO2e/L
+  vehicle_type: articulated # Assumed type
+  base_purchase_price_aud: 350000 # Renamed
+  lifespan_years: 15 # Explicit lifespan
+  residual_value_percent_projections: # Renamed and structured
+    15: 0.10 # Used residual_value_percent at analysis_years
+  base_registration_cost_aud: 6000 # Renamed (used top-level annual_registration_cost)
+  # Fuel Details
+  fuel_consumption_l_per_100km: 36.0
+  co2_emission_factor_kg_per_l: 2.68 # Renamed
 
-# Infrastructure (EV)
-infrastructure_cost: 120000 # AUD (charger + installation) - Higher power charger
-infrastructure_maintenance_percent: 0.015 # Annual % of upfront cost
+# --- Infrastructure Costs ---
+infrastructure_costs:
+  selected_charger_cost_aud: 120000 # Renamed (used infrastructure_cost)
+  selected_installation_cost_aud: 0 # Renamed (set to 0, adjust as needed)
+  charger_maintenance_annual_rate_percent: 1.5 # Renamed & Scaled (0.015 -> 1.5)
+  charger_lifespan_years: 10 # Renamed (Added default)
 
-# Base Prices/Rates (Year 0 / Initial)
-electricity_price: 0.18 # AUD/kWh - Potentially lower with commercial arrangements
-diesel_price: 1.75 # AUD/L
-carbon_tax_rate: 30.0 # AUD/tonne CO2e
-road_user_charge: 0.0 # AUD/km (Example: Assuming none initially)
+# --- Price Projections & Selections ---
+# NOTE: Original file used base price + increase rate. New model expects projections.
+# Created minimal projections using base price for start year only.
+# User MUST update these projections for a realistic scenario.
+electricity_price_projections:
+  selected_scenario_name: constant_base
+  scenarios:
+    - name: constant_base
+      prices:
+        2025: { price_aud_per_kwh_or_range: 0.18 }
+        # Add more years or use interpolation/extrapolation logic in model
 
-# Annual Increase Rates
-electricity_price_increase: 0.02 # 2% annual increase
-diesel_price_increase: 0.018 # 1.8% annual increase
-carbon_tax_increase_rate: 0.05 # 5% annual increase
-road_user_charge_increase_rate: 0.03 # 3% increase (in case introduced later)
-maintenance_increase_rate: 0.015 # 1.5% annual increase
-insurance_increase_rate: 0.02 # 2% annual increase
-registration_increase_rate: 0.01 # 1% annual increase
+diesel_price_projections:
+  selected_scenario_name: constant_base
+  scenarios:
+    - name: constant_base
+      data: { price_aud_per_l_or_projection: 1.75 }
+      # Add more years or use interpolation/extrapolation logic in model
 
-# Flags / Options
-include_carbon_tax: true
-include_road_user_charge: false # Set to false as rate is 0
+# --- Detailed Maintenance Costs ---
+# NOTE: Original file used cost_per_km. New model expects detailed structure.
+# Created structure based on assumed vehicle type and cost_per_km.
+maintenance_costs_detailed:
+  articulated_bet:
+    cost_aud_per_km: 0.08 # Used electric_maintenance_cost_per_km
+    # Add other fields like annual_cost_min/max_aud if available/needed
+  articulated_diesel:
+    cost_aud_per_km: 0.15 # Used diesel_maintenance_cost_per_km
+    # Add other fields like annual_cost_min/max_aud if available/needed
 
-# Battery Replacement (EV)
-battery_degradation_rate: 0.025 # 2.5% annual capacity loss - Higher for long-haul duty cycle
-battery_replacement_threshold: 0.70 # Replace if capacity drops below 70%
-force_battery_replacement_year: null # Let degradation trigger it
+# --- Insurance and Registration Costs ---
+# NOTE: Original file used insurance_cost_percent per vehicle.
+# Moved into structured format, using top-level registration cost.
+insurance_registration_costs:
+  electric:
+    base_annual_cost_aud: 6000 # Used top-level annual_registration_cost
+    cost_type: percentage_of_value # Based on original insurance_cost_percent
+    annual_rate_percent_of_value: 2.5 # Used electric insurance_cost_percent, Scaled (0.025->2.5)
+  diesel:
+    base_annual_cost_aud: 6000 # Used top-level annual_registration_cost
+    cost_type: percentage_of_value # Based on original insurance_cost_percent
+    annual_rate_percent_of_value: 3.0 # Used diesel insurance_cost_percent, Scaled (0.03->3.0)
+
+# --- Carbon Tax Configuration ---
+carbon_tax_config:
+  include_carbon_tax: true # Renamed
+  initial_rate_aud_per_tonne_co2e: 30.0 # Renamed
+  annual_increase_rate_percent: 5.0 # Renamed & Scaled (0.05 -> 5.0)
+
+# --- Road User Charge Configuration ---
+road_user_charge_config:
+  include_road_user_charge: false # Renamed
+  initial_charge_aud_per_km: 0.0 # Renamed
+  annual_increase_rate_percent: 3.0 # Renamed & Scaled (0.03 -> 3.0)
+
+# --- General Cost Increase Rates ---
+general_cost_increase_rates:
+  maintenance_annual_increase_rate_percent: 1.5 # Renamed & Scaled (0.015 -> 1.5)
+  insurance_annual_increase_rate_percent: 2.0 # Renamed & Scaled (0.02 -> 2.0)
+  registration_annual_increase_rate_percent: 1.0 # Renamed & Scaled (0.01 -> 1.0)
+
+# --- Battery Replacement Configuration ---
+battery_replacement_config:
+  enable_battery_replacement: true # Added default
+  annual_degradation_rate_percent: 2.5 # Renamed & Scaled (0.025 -> 2.5)
+  replacement_threshold_fraction: 0.70 # Renamed (Scale unchanged)
+  force_replacement_year_index: null # Renamed

@@ -7,10 +7,11 @@ This module provides widgets for general scenario parameters.
 import streamlit as st
 import datetime
 import logging
-from typing import Dict, Any
+from typing import Any
 
 from ui.widgets.input_widgets.sidebar import SidebarWidget
 from config import constants
+from tco_model.scenarios import Scenario
 
 logger = logging.getLogger(__name__)
 
@@ -20,32 +21,36 @@ class GeneralInputWidget(SidebarWidget):
     def __init__(self, expanded: bool = True):
         super().__init__("General", expanded)
         
-    def render_content(self, params: Dict[str, Any]) -> None:
-        st.text_input("Scenario Name", key="name", value=params['name'])
+    def render_content(self, scenario: Scenario) -> None:
+        st.text_input(
+            "Scenario Name", 
+            key="scenario.name"
+        )
         
-        current_year = params['start_year']
+        current_year = datetime.datetime.now().year
         st.number_input(
             "Start Year", 
             min_value=current_year - 10, 
             max_value=current_year + 30,
             step=1, 
             format="%d", 
-            key="start_year",
-            value=current_year
+            key="scenario.analysis_start_year"
         )
         
         st.number_input(
-            "Life Cycle (Years)", 
+            "Analysis Period (Years)",
             min_value=constants.MIN_ANALYSIS_YEARS, 
             max_value=constants.MAX_ANALYSIS_YEARS,
             step=1, 
             format="%d", 
-            key="analysis_years", 
-            help="Duration of the analysis in years (1-30).",
-            value=params['analysis_years']
+            key="scenario.analysis_period_years",
+            help="Duration of the analysis in years (1-30)."
         )
         
-        st.text_area("Description", key="description", value=params['description'])
+        st.text_area(
+            "Description", 
+            key="scenario.description"
+        )
 
 
 class EconomicInputWidget(SidebarWidget):
@@ -54,16 +59,15 @@ class EconomicInputWidget(SidebarWidget):
     def __init__(self, expanded: bool = False):
         super().__init__("Economic", expanded)
         
-    def render_content(self, params: Dict[str, Any]) -> None:
+    def render_content(self, scenario: Scenario) -> None:
         st.number_input(
             "Discount Rate (%)", 
             min_value=0.0, 
             max_value=20.0, 
             step=0.1, 
             format="%.1f", 
-            key="discount_rate", 
-            help="Real discount rate (0-20%).",
-            value=params['discount_rate']
+            key="scenario.economic_parameters.discount_rate_percent_real",
+            help="Real discount rate (0-20%)."
         )
         
         st.number_input(
@@ -72,28 +76,25 @@ class EconomicInputWidget(SidebarWidget):
             max_value=10.0, 
             step=0.1, 
             format="%.1f", 
-            key="inflation_rate", 
-            help="General inflation rate (0-10%).",
-            value=params['inflation_rate']
+            key="scenario.economic_parameters.inflation_rate_percent",
+            help="General inflation rate (0-10%)."
         )
         
+        finance_method_key = "scenario.financing_options.financing_method"
         st.selectbox(
             "Financing Method", 
             options=["loan", "cash"], 
-            key="financing_method", 
-            index=0 if params['financing_method'] == 'loan' else 1
+            key=finance_method_key
         )
         
-        # Only show loan parameters if financing method is "loan"
-        if st.session_state.get('financing_method') == 'loan':
+        if scenario.financing_options.financing_method == 'loan':
             st.number_input(
                 "Loan Term (years)", 
                 min_value=1, 
                 max_value=15, 
                 step=1, 
-                key="loan_term", 
-                help="Duration of the vehicle loan financing.",
-                value=params['loan_term']
+                key="scenario.financing_options.loan_term_years",
+                help="Duration of the vehicle loan financing."
             )
             
             st.number_input(
@@ -102,9 +103,8 @@ class EconomicInputWidget(SidebarWidget):
                 max_value=20.0, 
                 step=0.1, 
                 format="%.1f", 
-                key="interest_rate", 
-                help="Loan interest rate (0-20%).",
-                value=params['interest_rate']
+                key="scenario.financing_options.loan_interest_rate_percent",
+                help="Loan interest rate (0-20%)."
             )
             
             st.number_input(
@@ -113,9 +113,8 @@ class EconomicInputWidget(SidebarWidget):
                 max_value=100.0, 
                 step=1.0, 
                 format="%.1f", 
-                key="down_payment_pct", 
-                help="Down payment percentage (0-100%).",
-                value=params['down_payment_pct']
+                key="scenario.financing_options.down_payment_percent",
+                help="Down payment percentage (0-100%)."
             )
 
 
@@ -125,13 +124,12 @@ class OperationalInputWidget(SidebarWidget):
     def __init__(self, expanded: bool = True):
         super().__init__("Operational", expanded)
         
-    def render_content(self, params: Dict[str, Any]) -> None:
+    def render_content(self, scenario: Scenario) -> None:
         st.number_input(
             "Annual Mileage (km)", 
             min_value=0.0, 
             step=1000.0, 
             format="%.0f", 
-            key="annual_mileage", 
-            help="Average distance the vehicle is expected to travel per year.",
-            value=params['annual_mileage']
+            key="scenario.operational_parameters.annual_mileage_km",
+            help="Average distance the vehicle is expected to travel per year."
         ) 

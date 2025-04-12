@@ -124,14 +124,15 @@ class TCOBreakdownTable(TableWidget):
         Args:
             vehicle_type: Vehicle type to display ("electric" or "diesel")
         """
-        super().__init__(f"{vehicle_type.title()} Cost Breakdown")
+        super().__init__(f"{vehicle_type.title()} Annual Costs (Undiscounted)")
         self.vehicle_type = vehicle_type
     
     def get_dataframe(self, params: Dict[str, Any]) -> Optional[pd.DataFrame]:
-        key = f"{self.vehicle_type}_yearly_costs"
+        key = f"{self.vehicle_type}_annual_costs_undiscounted"
         if key not in params or not is_valid_dataframe(params[key]):
+            logger.warning(f"Required key '{key}' not found or invalid in results dictionary.")
             return None
-        return params[key]
+        return params[key].copy()
     
     def format_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """Format monetary values as currency."""
