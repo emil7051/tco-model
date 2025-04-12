@@ -23,14 +23,14 @@ This document outlines the step-by-step plan for improving the Australian Heavy 
 - ✅ Move magic numbers and strings to constants
 - ✅ Document the project structure in README.md
 
+### 2.1 ✅ Centralize Data Handling
+- ✅ Enhance `utils/data_handlers.py` to handle all data loading
+- ✅ Implement caching using Streamlit's caching mechanisms
+- ✅ Create a consistent interface for loading different data types
+
 ## 📋 Pending Tasks
 
 ### 2. Data Management
-
-#### 2.1 Centralize Data Handling
-- [ ] Enhance `utils/data_handlers.py` to handle all data loading
-- [ ] Implement caching using Streamlit's caching mechanisms
-- [ ] Create a consistent interface for loading different data types
 
 #### 2.2 Implement Data Versioning
 - [ ] Add versioning for configuration files
@@ -104,7 +104,7 @@ The recommended order for implementing these changes is:
 4. Improve documentation (Task 5.2 - initial phase)
 
 ### Phase 2: Data Layer Improvements
-1. Centralize data handling (Task 2.1)
+1. ✅ Centralize data handling (Task 2.1)
 2. Implement data versioning (Task 2.2)
 3. Improve data flow (Task 2.3)
 4. Add tests for data layer (Task 5.1 - partial)
